@@ -1,0 +1,119 @@
+# Root Taskfile for slopstopper itself.
+#
+# Two task surfaces live here:
+#   1. `task ss:*`: the adopter-facing quality suite, included from
+#      ./Taskfile.ss.yml. This is what gets shipped to adopter repos
+#      by install.sh.
+#   2. `task contributing:*` and `task decisions:*`: slopstopper-internal
+#      tooling for working on the CLI and its governance. These are NOT
+#      shipped to adopters. Every target here does real work in THIS repo;
+#      nothing degrades to an "ℹ️ nothing to do" echo.
+#
+# See `task --list-all` for the full surface.
+
+version: '3'
+
+includes:
+  ss:
+    taskfile: ./Taskfile.ss.yml
+  # The CLI package's own Taskfile (pytest loop). Included as internal so
+  # `contributing:test` can delegate to it without a second public namespace.
+  # Invoke it directly with `task -t cli/Taskfile.yml test` if you prefer.
+  cli:
+    taskfile: ./cli/Taskfile.yml
+    dir: ./cli
+    internal: true
+
+tasks:
+  # ───────────── Contributing: slopstopper's own dev loop ─────────────
+
+  contributing:setup:
+    desc: Install npm deps, the CLI (editable, in cli/.venv), Playwright's Chromium, and the pre-push hook
+    cmds:
+      - npm install
+      - task: cli:install
+      - npx playwright install chromium
+      - task: contributing:hooks-install
+
+  contributing:hooks-install:
+    desc: Point git at .githooks so the pre-push hygiene gate runs locally
+    cmds:
+      - git config core.hooksPath .githooks
+      - echo "✅ core.hooksPath → .githooks (pre-push runs task ss:hygiene:test)"
+
+  contributing:lint:
+    desc: markdownlint over docs/ and CONTRIBUTING.md (advisory, not a CI gate)
+    cmds:
+      - npx markdownlint 'docs/**/*.md' CONTRIBUTING.md {{.CLI_ARGS}}
+
+  contributing:test:
+    desc: Run the CLI's pytest suite (cli/tests); pass `-- -k <expr>` to filter
+    cmds:
+      - task: cli:test
+
+  # ───────────── Decisions: slopstopper's ADR governance ─────────────
+  #
+  # docs/decisions/README.md is the single decisions file: it carries the
+  # log table AND the note template inline. Supporting notes are optional
+  # siblings named <date>-<slug>.md.
+
+  decisions:validate:
+    silent: true
+    desc: Validate docs/decisions/README.md carries the log table + the note template
+    cmds:
+      - |
+        f=docs/decisions/README.md
+        if [ ! -f "$f" ]; then
+          echo "❌ $f not found"
+          exit 1
+        fi
+        if ! grep -q "| Date | Decision | Status | Rationale | Notes |" "$f"; then
+          echo "❌ $f is missing the decisions table header"
+          exit 1
+        fi
+        if ! grep -q "^# Decision Template" "$f"; then
+          echo "❌ $f is missing the '# Decision Template' section"
+          exit 1
+        fi
+        echo "✅ Decisions documentation baseline is valid"
+
+  decisions:new:
+    silent: true
+    desc: Create docs/decisions/<date>-<slug>.md from the template in README.md (use SLUG=<name>)
+    vars:
+      DATE:
+        sh: date +%F
+    cmds:
+      - |
+        set -eo pipefail
+        slug='{{.SLUG}}'
+        if [ -z "$slug" ]; then
+          echo "❌ Missing SLUG. Usage: task decisions:new SLUG=<decision-name>"
+          exit 1
+        fi
+        # The slug becomes a filename and a sed replacement: keep it plain.
+        if ! printf '%s' "$slug" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
+          echo "❌ SLUG must be lowercase letters, digits and hyphens (got: $slug)"
+          exit 1
+        fi
+        target="docs/decisions/{{.DATE}}-$slug.md"
+        if [ -f "$target" ]; then
+          echo "❌ $target already exists"
+          exit 1
+        fi
+        # Copy the '# Decision Template' section to EOF, minus the README's
+        # "Use this template…" line, retitled after the slug and dated today.
+        # Written to a temp file first, so a template that went missing
+        # fails here instead of leaving an empty note behind.
+        tmp="$(mktemp)"
+        trap 'rm -f "$tmp"' EXIT
+        awk '/^# Decision Template/{p=1; print; next} p && /^Use this template/{getline; next} p' docs/decisions/README.md \
+          | sed -e "1s/.*/# Decision: $slug/" -e 's/^- Date: YYYY-MM-DD/- Date: {{.DATE}}/' > "$tmp"
+        if ! grep -q '^## Metadata' "$tmp"; then
+          echo "❌ No '# Decision Template' section in docs/decisions/README.md. Run task decisions:validate"
+          exit 1
+        fi
+        mv "$tmp" "$target"
+        echo "✅ Created $target"
+        echo "   Now add a row to the log table in docs/decisions/README.md that links it in the Notes column,"
+        echo "   ss:hygiene:docs-structure fails a note nothing links to."

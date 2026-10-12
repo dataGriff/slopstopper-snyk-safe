@@ -1,0 +1,179 @@
+name: SlopStopper · Accessibility Check
+
+# Audits accessibility against WCAG 2.1 AA using axe-core via Playwright.
+# Triggers: PR, push to main, daily schedule, `deployment_status` events,
+# and manual dispatch. Emits a rolling PR comment (find-or-update by H2
+# marker) and a main-branch tracking issue on violations; auto-closes the
+# issue on a clean run.
+# Docs: docs/reliability/ACCESSIBILITY.md.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  deployment_status:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to audit (leave blank to audit local build)'
+        required: false
+        default: ''
+        type: string
+      impact:
+        description: 'Minimum violation impact to fail on (critical|serious|moderate|minor)'
+        required: false
+        default: 'serious'
+        type: string
+      threshold:
+        description: 'Maximum allowed violations before failing (default: 0)'
+        required: false
+        default: '0'
+        type: string
+      coverage_mode:
+        description: 'Force discovery mode (overrides .slopstopper.yml)'
+        required: false
+        default: ''
+        type: choice
+        options: ['', 'sitemap', 'changed']
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  accessibility:
+    name: Accessibility Audit (axe-core / WCAG 2.1 AA)
+    if: |
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        # A stalled browser download otherwise holds the job until GitHub's
+        # six-hour limit. Each attempt gets five minutes and a stall is
+        # retried once; the step timeout bounds both attempts.
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2; do
+            if timeout --kill-after=30s 5m npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::Playwright browser install attempt ${attempt} failed or stalled after 5 minutes"
+          done
+          echo "::error::Playwright browser install failed twice. Re-run the job; if it keeps failing, check the runner's network."
+          exit 1
+
+      - name: Determine audit URL
+        id: url
+        # CUSTOMISE FOR YOUR APP: urls.production / urls.preview in
+        # .slopstopper.yml. See .github/actions/ss-resolve-url for the
+        # event → URL table.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: local
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          check: Accessibility Check
+
+      - name: Start local server (PR / push builds)
+        if: steps.url.outputs.use_local == 'true'
+        # CUSTOMISE FOR YOUR APP: by default this runs `npm run build`
+        # then `slopstopper serve` (the bundled static server). Point
+        # ACCESSIBILITY_TEST_URL at a deployed environment to skip the
+        # local serve, or eject the bundled server with
+        # `slopstopper templates eject server.js` and customise `.ss/server.js`.
+        run: |
+          if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+            npm run build
+          fi
+          slopstopper serve &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 10); do
+            if curl -s http://localhost:8080 > /dev/null; then
+              echo "✅ Server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Pages to audit
+        if: steps.url.outputs.use_local == 'true'
+        env:
+          DISPATCH_MODE: ${{ github.event.inputs.coverage_mode }}
+          GITHUB_BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request|pull_request_target) EVENT=pr ;;
+            push)              EVENT=main ;;
+            schedule)          EVENT=cron ;;
+            deployment_status) EVENT=main ;;
+            workflow_dispatch) EVENT="${DISPATCH_MODE:-main}" ;;
+            *)                 EVENT=main ;;
+          esac
+          PAGES=$(slopstopper discover accessibility --event="$EVENT")
+          echo "ACCESSIBILITY_PAGES=$PAGES" >> "$GITHUB_ENV"
+
+      - name: Run accessibility audit
+        id: audit
+        env:
+          TARGET_URL: ${{ steps.url.outputs.url }}
+          ACCESSIBILITY_IMPACT: ${{ github.event.inputs.impact || 'serious' }}
+          ACCESSIBILITY_THRESHOLD: ${{ github.event.inputs.threshold || '0' }}
+        run: task ss:reliability:accessibility -- "$TARGET_URL" --ci
+
+      - name: Stop local server
+        if: steps.url.outputs.use_local == 'true' && always()
+        run: kill "$SERVER_PID" || true
+
+      - name: Upload accessibility report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: accessibility-report-${{ github.run_id }}
+          path: |
+            playwright-report/
+            .ss/playwright-report/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:accessibility --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
+
+      - name: Emit issue on accessibility failure (main)
+        if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:accessibility --target issue
+
+      - name: Close accessibility issue on recovery (main)
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:accessibility --target issue --on-pass=close

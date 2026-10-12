@@ -1,0 +1,93 @@
+name: CI · slopstopper-cli
+
+# Internal CI for the slopstopper-cli Python package under cli/.
+# Not part of the distributed slopstopper suite: this workflow is
+# internal to this repository and is NOT seeded into adopter repos by
+# install.sh. Adopters never receive cli/, so they never need to run
+# its tests.
+#
+# One job: the pytest suite under cli/tests/, via cli/Taskfile.yml so
+# the exact command developers run locally is what CI runs. As the CLI
+# grows beyond pytest (lint, type-check, build, packaging smoke test),
+# add task targets in cli/Taskfile.yml and steps here rather than
+# spinning up new ss-*-check.yml workflows.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'cli/**'
+      - 'scripts/shot.py'
+      - '.github/workflows/ci-cli.yml'
+      # Every ss-* workflow calls `slopstopper run` / `slopstopper emit`,
+      # so a change to any of them needs the CLI tests too.
+      - '.github/workflows/ss-*.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'cli/**'
+      - 'scripts/shot.py'
+      - '.github/workflows/ci-cli.yml'
+      # Every ss-* workflow calls `slopstopper run` / `slopstopper emit`,
+      # so a change to any of them needs the CLI tests too.
+      - '.github/workflows/ss-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Set up toolchain (task)
+        # Installs the mise-pinned `task` (mise.toml [tools]), the same
+        # version locally and in CI. Replaces a `curl | sh` bootstrap.
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - name: Install Playwright
+        # test_specs_subpath.py runs the bundled specs in a real browser and
+        # skips without this. Each attempt is bounded so a stalled browser
+        # download can't hold the job.
+        timeout-minutes: 12
+        run: |
+          npm ci
+          for attempt in 1 2; do
+            if timeout --kill-after=30s 5m npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::Playwright browser install attempt ${attempt} failed or stalled after 5 minutes"
+          done
+          exit 1
+      - name: Run CLI tests
+        run: task -t cli/Taskfile.yml test
+
+  # The site's terminal demo (app/assets/demo.svg) is drawn from real CLI
+  # output. Rendering it here proves a change to what a command prints
+  # did not break the generator, and the artifact lets a reviewer look
+  # at the picture a change produces before anyone re-renders the
+  # committed one with `task contributing:shots`.
+  shots:
+    name: shots
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: pip install -e ./cli
+      - run: python scripts/shot.py --out shots
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shots
+          path: shots

@@ -1,0 +1,19 @@
+blank_issues_enabled: false
+
+# NOTE: If you fork this repository, update the URLs below to point to your own repository.
+contact_links:
+  - name: 💬 Ask your AI assistant first
+    url: https://github.com/dataGriff/slopstopper-snyk-safe/blob/main/docs/support/README.md#step-1-ask-ai-first
+    about: Most questions can be answered immediately by asking an AI assistant about the codebase (the repo ships two Claude Code skills for exactly this). Try this before opening an issue.
+
+  - name: 🗂️ Support Guide
+    url: https://github.com/dataGriff/slopstopper-snyk-safe/blob/main/docs/support/README.md
+    about: Read the support guide to understand the full support flow and choose the right channel.
+
+  - name: 💡 Start a Discussion (cross-repo or cross-team)
+    url: https://github.com/dataGriff/slopstopper-snyk-safe/discussions/new
+    about: Use a Discussion for questions that span multiple repositories, teams, or are architectural in nature.
+
+  - name: 🔒 Report a security vulnerability (private)
+    url: https://github.com/dataGriff/slopstopper-snyk-safe/security/advisories/new
+    about: Never open a public issue for a security bug. Private vulnerability reporting reaches only the maintainers.

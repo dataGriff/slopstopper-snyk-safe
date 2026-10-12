@@ -1,0 +1,64 @@
+{
+  "_comment": [
+    "Project-shape profiles: the single source of truth for which workflows",
+    "each profile switches off. Read by cli/slopstopper/profiles.py (the CLI)",
+    "AND by install.sh (via python3, resolved from the source checkout), so",
+    "there is exactly one copy of this mapping in the project.",
+    "",
+    "A profile only ever SUBTRACTS workflows. `workflows.disabled` in",
+    ".slopstopper.yml adds to a profile's set; `workflows.enabled` removes",
+    "from it, so an adopter can keep an individual check the profile drops.",
+    "",
+    "Adding a profile: add an entry here, then follow the AGENTS.md row for",
+    "'Adding or changing a .slopstopper.yml profile'."
+  ],
+  "default": "ui",
+  "profiles": {
+    "ui": {
+      "summary": "A web UI: a site or app that serves HTML to a browser.",
+      "detail": "Every browser, SEO, security and hygiene check applies. This is the default when `profile:` is unset. The four API checks (api-health, api-headers, api-latency, openapi drift) are added only when the repo has an API: an OpenAPI/Swagger spec or proto file, a server-framework dependency, or one of the API checks configured (api.health.path, api.latency.paths, api.headers.paths or api.openapi.spec). A site with no API doesn't run four jobs that check nothing; configure `api.*` (or list them under workflows.enabled) and re-run the installer to add them.",
+      "disables": [],
+      "disables_without_api": [
+        "ss-reliability-api-health-check.yml",
+        "ss-security-api-headers-check.yml",
+        "ss-reliability-api-latency-check.yml",
+        "ss-hygiene-openapi-check.yml"
+      ]
+    },
+    "api": {
+      "summary": "An HTTP API: JSON/gRPC endpoints with no browser-rendered surface.",
+      "detail": "Drops the nine browser-and-SEO checks: they assume HTML, a DOM and a public web surface, so on an API repo they fail rather than no-op. Keeps the four API checks (api-health, api-headers, api-latency, openapi drift) and CSP exceptions (APIs still set response headers; inert until you set headers.source). All of them skip until configured. The Snyk checks (sast, dependencies, iac, sbom) and secrets apply to every profile.",
+      "disables": [
+        "ss-reliability-smoke-tests.yml",
+        "ss-reliability-e2e-check.yml",
+        "ss-reliability-accessibility-check.yml",
+        "ss-reliability-broken-links-check.yml",
+        "ss-reliability-core-web-vitals.yml",
+        "ss-reliability-seo-check.yml",
+        "ss-reliability-llms-txt-check.yml",
+        "ss-reliability-robots-txt-check.yml",
+        "ss-reliability-sitemap-check.yml"
+      ]
+    },
+    "library": {
+      "summary": "A library, CLI or package with no deployed surface of any kind.",
+      "detail": "Drops everything that needs a URL: the nine browser-and-SEO checks, CSP exceptions, and the four API checks. hygiene:openapi is dropped here too, because it is the one hygiene check that needs a live API: drift means the spec against the thing it documents. What remains is the static-analysis layer (the Snyk checks, secrets, complexity and the docs checks), which is the whole of what applies to code that nothing serves.",
+      "disables": [
+        "ss-reliability-smoke-tests.yml",
+        "ss-reliability-e2e-check.yml",
+        "ss-reliability-accessibility-check.yml",
+        "ss-reliability-broken-links-check.yml",
+        "ss-reliability-core-web-vitals.yml",
+        "ss-reliability-seo-check.yml",
+        "ss-reliability-llms-txt-check.yml",
+        "ss-reliability-robots-txt-check.yml",
+        "ss-reliability-sitemap-check.yml",
+        "ss-hygiene-csp-exceptions-check.yml",
+        "ss-reliability-api-health-check.yml",
+        "ss-security-api-headers-check.yml",
+        "ss-reliability-api-latency-check.yml",
+        "ss-hygiene-openapi-check.yml"
+      ]
+    }
+  }
+}

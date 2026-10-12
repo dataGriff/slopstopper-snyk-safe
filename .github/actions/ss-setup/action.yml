@@ -1,0 +1,117 @@
+name: Set up slopstopper
+description: >-
+  Installs Python and the mise-pinned toolchain (task, node, snyk and
+  gitleaks), then slopstopper-cli: from source in the slopstopper repo
+  itself, or the exact git tag pinned in .slopstopper.yml (or the
+  SLOPSTOPPER_CLI_SPEC override) in an adopter repo. Every ss-* workflow
+  starts with this step.
+
+# One local composite action rather than the same steps copied into every
+# workflow. `uses: ./.github/actions/ss-setup` needs no publishing and no
+# versioning: install.sh copies this directory into adopter repos next to
+# the workflows, so everything a workflow does is still visible and
+# diffable in the adopter's own tree.
+#
+# The workflow must have checked out the repo before this runs, because a
+# local action is resolved from the checkout.
+#
+# How the CLI is pinned. slopstopper-cli is not on PyPI. An adopter pins an
+# EXACT git tag of the slopstopper repository under `cli:` in
+# .slopstopper.yml:
+#
+#   cli:
+#     source: https://github.com/<owner>/slopstopper.git
+#     ref: v0.21.0
+#
+# and this action installs `slopstopper-cli @ git+<source>@<ref>#subdirectory=cli`.
+# A tag, not a branch: the pin is the version everyone runs and a review of
+# the bump PR is the review of the new CLI. An enterprise that does not let
+# runners reach github.com mirrors the repository internally and points
+# `source` at the mirror, or builds the wheel once (`pip wheel ./cli`),
+# publishes it to an internal index and sets the SLOPSTOPPER_CLI_SPEC
+# environment variable (a repository or organisation variable, surfaced
+# with `env:` on the job) to a full pip requirement such as
+# `slopstopper-cli==0.21.0`; the override wins over the yml. No pipe-to-bash,
+# no unpinned `pip install slopstopper-cli`.
+
+inputs:
+  python-version:
+    description: Python to put on PATH (the CLI is a Python package)
+    required: false
+    default: '3.11'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Set up the mise-pinned toolchain
+      # Installs task, node, snyk and gitleaks at the exact versions in
+      # mise.toml ([tools]) and puts them on PATH for later steps. mise
+      # resolves the pins per-repo, so CI and local runs share one version
+      # of every scanner and no workflow downloads a tool by hand.
+      uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+
+    - name: Install slopstopper-cli from source (slopstopper repo only)
+      # In the slopstopper repo the CLI runs from source (HEAD): this is the
+      # code under test, so no pin applies. Adopter repos have no cli/
+      # source and take the next step instead.
+      if: ${{ hashFiles('cli/pyproject.toml') != '' }}
+      shell: bash
+      run: pip install -e ./cli
+
+    - name: Install the pinned slopstopper-cli (adopter repos)
+      # Reads `cli.source` and `cli.ref` from .slopstopper.yml with the
+      # Python standard library (the CLI, which has the config reader, is
+      # what is being installed, and PyYAML is not a dependency anyone has
+      # yet): the two keys are the first `source:` and `ref:` lines
+      # indented under a top-level `cli:` block. SLOPSTOPPER_CLI_SPEC, when
+      # set, is used verbatim as the pip requirement instead.
+      if: ${{ hashFiles('cli/pyproject.toml') == '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${SLOPSTOPPER_CLI_SPEC:-}" ]; then
+          spec="$SLOPSTOPPER_CLI_SPEC"
+          echo "Installing slopstopper-cli from SLOPSTOPPER_CLI_SPEC: $spec"
+        else
+          spec="$(python3 - <<'PY'
+        import re, sys
+        from pathlib import Path
+        path = Path(".slopstopper.yml")
+        source = ref = ""
+        if path.is_file():
+            inside = False
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if re.match(r"^cli:\s*(#.*)?$", line):
+                    inside = True
+                    continue
+                if inside and re.match(r"^\S", line):
+                    break
+                if not inside:
+                    continue
+                m = re.match(r"^\s+(source|ref):\s*([^\s#]+)", line)
+                if m and m.group(1) == "source" and not source:
+                    source = m.group(2).strip("\"'")
+                elif m and m.group(1) == "ref" and not ref:
+                    ref = m.group(2).strip("\"'")
+        if not (source and ref):
+            sys.stderr.write(
+                "::error::slopstopper-cli is not pinned. Set `cli.source` (the git URL of the "
+                "slopstopper repository or your mirror of it) and `cli.ref` (an exact tag) in "
+                ".slopstopper.yml, or set the SLOPSTOPPER_CLI_SPEC variable to a pip requirement "
+                "served by your internal index.\n")
+            sys.exit(1)
+        if not re.match(r"^(https://|ssh://|git@)", source):
+            sys.stderr.write(f"::error::cli.source must be an https:// or ssh git URL, got {source!r}\n")
+            sys.exit(1)
+        print(f"slopstopper-cli @ git+{source}@{ref}#subdirectory=cli")
+        PY
+        )"
+          echo "Installing slopstopper-cli pinned by .slopstopper.yml: $spec"
+        fi
+        pip install "$spec"
+        slopstopper --version

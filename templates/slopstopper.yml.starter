@@ -1,0 +1,85 @@
+# .slopstopper.yml: slopstopper's per-repo config.
+#
+# This is the starter install.sh seeds: the handful of keys most repos
+# actually set. Every other knob has a sensible default and is documented,
+# with its default, in the schema reference, .slopstopper.yml.example at
+# the root of the slopstopper checkout you installed from (the one whose
+# tag matches `cli.ref` below). Copy a block from there when you need it.
+# Re-running install.sh never overwrites this file; it only rewrites the
+# `cli:` block (below) and, with --profile, the `profile:` line.
+
+# This repo's shape. ui (the default) is a site or app that serves HTML;
+# api has JSON/gRPC endpoints and no browser surface, so it drops the nine
+# browser checks; library deploys nothing and drops every URL-driven check.
+# `install.sh --profile api` writes this; re-run install.sh after changing it.
+profile: ui
+
+# Where the deployed app lives. production is what scheduled runs audit
+# (and the API checks on a push to main); preview is where your PRs
+# deploy. The browser checks build and serve the repo on PRs and pushes;
+# the API checks hit preview on a PR, and skip there without it. Leave it
+# blank if you have no preview.
+urls:
+  production:
+  preview:
+
+# Paths each browser check audits, comma-separated. `/` is the default.
+# For a larger site, `reliability.coverage.*` in the schema reference
+# derives these from your sitemap or the PR's diff instead.
+pages:
+  smoke:         /
+  e2e:           /
+  accessibility: /
+  seo:           /
+  broken_links:  /
+
+# The site-wide share image the smoke test asserts. '' skips the assertion.
+smoke:
+  og_image_path: /og-image.png
+
+# Your security-headers file, for the CSP-drift check: a public/_headers
+# file (Netlify / Cloudflare Pages format), a JSON array of {for, values}
+# entries, or on a host that can't send headers the built HTML root (e.g.
+# dist) with `format: meta`, which reads each page's <meta> CSP. null
+# skips the check.
+headers:
+  source: null
+
+# The Snyk checks (sast, dependencies, iac, sbom) authenticate with the
+# SNYK_TOKEN secret and scan under the organisation named by the SNYK_ORG
+# variable or `snyk.org` here. `fail_on` is the lowest severity that fails
+# a check: critical | high | medium | low | none.
+security:
+  snyk:
+    org:
+  sast:
+    fail_on: high
+  dependencies:
+    fail_on: high
+    include_dev: false
+  iac:
+    fail_on: high
+  sbom:
+    format: cyclonedx1.5+json
+    allow_empty: false
+
+# If you serve an API, copy the `api:` block from the schema reference
+# above. Under `ui` the four API checks are installed once the repo shows an
+# API: a spec, a server framework, or api.health.path / api.latency.paths /
+# api.headers.paths / api.openapi.spec set here; re-run install.sh after.
+
+# Any check you don't want, by workflow filename. A profile drops whole
+# sets; this is for one-offs. `enabled` takes a single check back from a
+# profile.
+workflows:
+  disabled: []
+  enabled: []
+
+# install.sh appends the `cli:` block here: the git repository and exact
+# ref (tag or commit SHA) slopstopper-cli is installed from, locally by pipx
+# and in CI by the ss-setup action. It looks like this, with the ref of the
+# checkout install.sh ran from; to move it, clone the new tag and re-run.
+#
+# cli:
+#   source: https://github.com/dataGriff/slopstopper-snyk-safe.git
+#   ref: v0.1.0

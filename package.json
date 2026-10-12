@@ -1,0 +1,25 @@
+{
+  "name": "slopstopper",
+  "version": "1.0.0",
+  "description": "SlopStopper (Snyk edition) - deterministic feedback for AI-driven development",
+  "scripts": {
+    "build": "echo 'No build step: the browser checks serve the repo as-is.'",
+    "start": "slopstopper serve",
+    "test": "slopstopper run reliability:smoke",
+    "test:accessibility": "slopstopper run reliability:accessibility",
+    "test:links": "slopstopper run reliability:broken-links"
+  },
+  "keywords": [
+    "slopstopper",
+    "code-quality",
+    "snyk"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
+    "@lhci/cli": "^0.14.0",
+    "@playwright/test": "^1.40.0",
+    "markdownlint-cli": "^0.47.0"
+  }
+}

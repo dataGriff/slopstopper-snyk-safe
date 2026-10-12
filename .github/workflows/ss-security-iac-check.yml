@@ -1,0 +1,96 @@
+name: SlopStopper · IaC Scan
+
+# Scans infrastructure-as-code in the repository (Terraform, CloudFormation,
+# Kubernetes manifests, Helm charts, ARM templates) for misconfigurations
+# with Snyk IaC (`snyk iac test`, the CLI pinned in mise.toml). The check
+# itself is the gate: it exits 1 when a finding is at or above
+# `security.iac.fail_on` (default: high) and 2 when the scan couldn't
+# run. A repository with no IaC files passes with a note. Triggers: PR,
+# push to main, manual dispatch. Emits a rolling PR comment and a
+# main-branch tracking issue when blocking findings land (exit 1 only).
+#
+# Needs: the SNYK_TOKEN repository secret (a service-account token).
+# Optional repository variables: SNYK_ORG (the organisation slug to scan
+# under) and SNYK_API (a regional endpoint such as https://api.eu.snyk.io).
+# Docs: docs/security/README.md.
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  iac:
+    name: Scan Infrastructure as Code with Snyk IaC
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, snyk, gitleaks) and
+        # the pinned slopstopper-cli (from source in the slopstopper repo).
+        # One local composite action; install.sh copies it in next to the
+        # workflows.
+        uses: ./.github/actions/ss-setup
+
+      # The check itself is the gate: it exits 1 on blocking findings, so
+      # this step's outcome IS the verdict. No separate detect / fail-job
+      # steps, and the local `task ss:security:iac` agrees with CI.
+      - name: Run IaC scan
+        id: iac
+        # `task -x` passes the CLI's exit code through (plain `task` maps
+        # every failure to 201). The code is kept as an output so later
+        # steps can tell findings (1) from could-not-run (2).
+        shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_ORG: ${{ vars.SNYK_ORG }}
+          SNYK_API: ${{ vars.SNYK_API }}
+        run: |
+          set +e
+          task -x ss:security:iac
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit $rc
+
+      - name: Upload IaC reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iac-reports
+          path: .ss/reports/iac/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Emit PR comment
+        if: always() && github.event_name == 'pull_request' && steps.iac.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit security:iac --target pr-comment --status ${{ steps.iac.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
+
+      - name: Emit issue on main (if blocking findings)
+        # Only rc 1 is a finding. Exit 2 means the scan didn't run.
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.iac.outputs.rc == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit security:iac --target issue
+
+      - name: Close issue on main when clean
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.iac.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit security:iac --target issue --on-pass=close

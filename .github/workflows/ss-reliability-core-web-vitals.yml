@@ -1,0 +1,157 @@
+name: SlopStopper · Core Web Vitals
+
+# Measures Core Web Vitals (LCP, INP, CLS) with Lighthouse CI against the
+# thresholds in cli/slopstopper/data/lighthouserc{,.prod}.json. Triggers:
+# PR, push to main, daily schedule, `deployment_status` events, and manual
+# dispatch. Emits a rolling PR comment with the threshold table and a
+# main-branch tracking issue on regressions; auto-closes the issue on a
+# green run.
+# Docs: docs/reliability/README.md.
+
+on:
+  deployment_status:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to audit (leave blank to use urls.production from .slopstopper.yml)'
+        required: false
+        default: ''
+        type: string
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cwv:
+    name: Core Web Vitals (Lighthouse CI)
+    if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine audit URL
+        id: audit-url
+        # CUSTOMISE FOR YOUR APP: urls.production / urls.preview in
+        # .slopstopper.yml. See .github/actions/ss-resolve-url for the
+        # event → URL table.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: local
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          dispatch-fallback: production
+          check: Core Web Vitals
+
+      # CUSTOMISE FOR YOUR APP: these two steps build and serve this
+      # repo's static site. Replace with your app's build/serve
+      # commands, or remove them and only audit deployed URLs.
+      - name: Build site
+        if: steps.audit-url.outputs.use_local == 'true'
+        run: |
+          if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+            npm run build
+          else
+            echo "ℹ️  Skipping the build because there is no build script."
+          fi
+
+      - name: Start local server
+        if: steps.audit-url.outputs.use_local == 'true'
+        run: |
+          slopstopper serve &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 15); do
+            if curl -s http://localhost:8080 > /dev/null; then
+              echo "✅ Server is ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run Core Web Vitals audit
+        id: cwv
+        env:
+          LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
+          AUDIT_URL: ${{ steps.audit-url.outputs.url }}
+          IS_PROD: ${{ steps.audit-url.outputs.prod }}
+        continue-on-error: true
+        run: |
+          echo "🔍 Auditing: $AUDIT_URL  (prod=$IS_PROD)"
+          if [ "$IS_PROD" = "true" ]; then
+            task ss:reliability:cwv -- "$AUDIT_URL" --prod
+          else
+            task ss:reliability:cwv -- "$AUDIT_URL"
+          fi
+
+      - name: Stop local server
+        if: steps.audit-url.outputs.use_local == 'true' && always()
+        run: kill "$SERVER_PID" || true
+
+      - name: Upload Lighthouse reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lighthouse-reports-${{ github.run_id }}
+          path: |
+            .lighthouseci/
+            .ss/reports/cwv/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Comment on PR with results
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:cwv --target pr-comment --status ${{ steps.cwv.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
+
+      - name: Open / update issue on CWV failure (main)
+        if: |
+          steps.cwv.outcome == 'failure' &&
+          github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:cwv --target issue
+
+      - name: Close CWV failure issue on recovery
+        if: |
+          steps.cwv.outcome == 'success' &&
+          github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:cwv --target issue --on-pass=close
+
+      - name: Fail the job if CWV thresholds were not met
+        if: steps.cwv.outcome == 'failure'
+        run: |
+          echo "::error::Core Web Vitals thresholds not met. See .ss/reports/cwv/cwv-report.md for details."
+          exit 1

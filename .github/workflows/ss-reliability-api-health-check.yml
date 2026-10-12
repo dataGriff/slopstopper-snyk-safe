@@ -1,0 +1,96 @@
+name: SlopStopper · API Health Check
+
+# Probes the API's health/readiness endpoint and asserts its contract:
+# reachable, the documented status code, a JSON content-type, a body that
+# parses, and whatever fields `api.health.require_fields` / `expect_fields`
+# declare. The API-shaped analogue of the smoke check. Triggers: PR, push to
+# main, daily schedule, `deployment_status` events, and manual dispatch.
+# Emits a rolling PR comment. The workflow fails on a broken contract. There
+# is no separate main-branch issue because the exit code is the signal.
+# Docs: docs/reliability/README.md.
+#
+# Unlike the browser checks, this workflow never tries to build and serve
+# the repo locally: an API is not a static bundle `slopstopper serve` can
+# host, and guessing a start command would be worse than not guessing. It
+# audits a URL you point it at (urls.preview on PRs, urls.production on
+# main/schedule) and skips cleanly when neither is configured.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  deployment_status:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Base URL of the API to audit'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-health:
+    name: API health/readiness endpoint audit
+    if: |
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Determine audit URL
+        id: url
+        # CUSTOMISE FOR YOUR APP: point urls.preview (.slopstopper.yml) at the
+        # environment your PRs deploy to. With no preview environment the PR
+        # run skips rather than failing. The deployed-main and scheduled
+        # runs still cover the endpoint. See .github/actions/ss-resolve-url.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: skip
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          check: API Health Check
+
+      - name: Run API health audit
+        if: steps.url.outputs.skip == 'false'
+        id: audit
+        env:
+          TARGET_URL: ${{ steps.url.outputs.url }}
+        run: task ss:reliability:api-health -- "$TARGET_URL"
+
+      - name: Upload API health report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-health-report-${{ github.run_id }}
+          path: .ss/reports/api-health/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Emit PR comment
+        if: github.event_name == 'pull_request' && steps.url.outputs.skip == 'false' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:api-health --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

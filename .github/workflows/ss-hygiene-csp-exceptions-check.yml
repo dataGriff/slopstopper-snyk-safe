@@ -1,0 +1,81 @@
+name: SlopStopper · Hygiene - CSP Exceptions Drift Check
+
+# Validates that CSP exceptions declared in code (suppressions,
+# allowlists) match docs/security/CSP_EXCEPTIONS.md. Triggers: every
+# PR and push to main, since the source is whatever headers.source names
+# (a headers file, or every built page's <meta> CSP). Workflow fails on
+# drift; no separate main-branch issue (exit code is the signal).
+# Docs: docs/security/CSP_EXCEPTIONS.md.
+
+# No paths filter: the headers source is whatever .slopstopper.yml names
+# (a headers file, or with `format: meta` every built page's <meta> CSP),
+# so a fixed list of paths would miss most of the changes that matter.
+# Without a source configured the check skips in seconds.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-csp-exceptions:
+    name: CSP Exceptions Drift Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Build the site (a <meta> CSP source only)
+        # `format: meta`, or `auto` with a source that is a built HTML root
+        # (no extension and not a file), reads each page's <meta> CSP from
+        # the built HTML, so build first, the way the browser checks do.
+        # Each `config get` fails the step on a broken CLI.
+        run: |
+          format="$(slopstopper config get headers.format)"
+          source="$(slopstopper config get headers.source)"
+          meta=false
+          if [ "$format" = "meta" ]; then
+            meta=true
+          elif [ "$format" = "auto" ] || [ -z "$format" ]; then
+            if [ -n "$source" ] && [ ! -f "$source" ] && [[ "${source##*/}" != *.* ]]; then meta=true; fi
+          fi
+          if [ "$meta" = true ] &&
+             [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+            if [ -f package-lock.json ]; then npm ci; fi
+            npm run build
+          fi
+
+      - name: Run CSP exceptions check
+        id: check
+        run: task ss:hygiene:csp-exceptions
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: csp-exceptions-report-${{ github.run_id }}
+          path: .ss/reports/csp/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Emit PR comment
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit hygiene:csp-exceptions --target pr-comment --status ${{ steps.check.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

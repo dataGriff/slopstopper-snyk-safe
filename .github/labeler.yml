@@ -1,0 +1,122 @@
+# Auto-labeling rules for PRs based on changed files (this repo's own).
+# Used by: .github/workflows/ss-hygiene-auto-label-pr.yml (actions/labeler v5)
+# Adopters get the generic templates/labeler.yml.example from install.sh.
+#
+# A PR touching a check's workflow, its docs directory or its check module
+# gets the category label. The workflow and docs globs match by prefix;
+# the check modules are listed by hand because their filenames carry no
+# category (sast.py, cwv.py). cli/tests/test_check_registration.py fails
+# when a registered check's module is missing from its category below, and
+# docs/contributing/CHANGE_MAP.md names this file for new and renamed checks.
+
+# ── Documentation ──
+docs:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'docs/**'
+      - '*.md'
+      - 'cli/README.md'
+
+# ── Security ──
+security:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/ss-security-*'
+      - 'docs/security/**'
+      - 'cli/slopstopper/checks/_snyk.py'
+      - 'cli/slopstopper/checks/sast.py'
+      - 'cli/slopstopper/checks/dependencies.py'
+      - 'cli/slopstopper/checks/iac.py'
+      - 'cli/slopstopper/checks/sbom.py'
+      - 'cli/slopstopper/checks/secrets.py'
+      - 'cli/slopstopper/checks/api_headers.py'
+
+# ── Reliability ──
+reliability:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/ss-reliability-*'
+      - 'docs/reliability/**'
+      - 'cli/slopstopper/checks/smoke.py'
+      - 'cli/slopstopper/checks/e2e.py'
+      - 'cli/slopstopper/checks/accessibility.py'
+      - 'cli/slopstopper/checks/broken_links.py'
+      - 'cli/slopstopper/checks/cwv.py'
+      - 'cli/slopstopper/checks/seo.py'
+      - 'cli/slopstopper/checks/llms_txt.py'
+      - 'cli/slopstopper/checks/robots_txt.py'
+      - 'cli/slopstopper/checks/sitemap.py'
+      - 'cli/slopstopper/checks/api_health.py'
+      - 'cli/slopstopper/checks/api_latency.py'
+      - 'cli/slopstopper/data/tests/**'
+      - 'cli/slopstopper/data/playwright.config.js'
+      - 'cli/slopstopper/data/lighthouserc*.json'
+      - 'cli/slopstopper/data/server.js'
+
+# ── Hygiene ──
+hygiene:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/ss-hygiene-*'
+      - '.github/labeler.yml'
+      - 'templates/labeler.yml.example'
+      - 'docs/hygiene/**'
+      - 'cli/slopstopper/checks/complexity.py'
+      - 'cli/slopstopper/checks/csp_exceptions.py'
+      - 'cli/slopstopper/checks/docs_accuracy.py'
+      - 'cli/slopstopper/checks/docs_size.py'
+      - 'cli/slopstopper/checks/docs_structure.py'
+      - 'cli/slopstopper/checks/entry_files.py'
+      - 'cli/slopstopper/checks/openapi.py'
+      - 'cli/slopstopper/data/templates/entry-files/**'
+
+# ── Operational: the plumbing around the checks ──
+operational:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/workflows/ss-pr-summary.yml'
+      - '.github/workflows/ss-workflow-failure-issue.yml'
+      - 'cli/slopstopper/comment.py'
+      - 'cli/slopstopper/emit.py'
+      - 'docs/architecture/PR_FEEDBACK.md'
+      - 'docs/runbooks/RELEASE.md'
+
+# ── CLI package ──
+cli:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'cli/**'
+
+# ── Tests ──
+tests:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'cli/tests/**'
+      - 'cli/slopstopper/data/tests/**'
+      - '.github/workflows/ci-cli.yml'
+
+# ── Installer, task shims, toolchain pin ──
+installer:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'install.sh'
+      - 'install-skill.sh'
+      - 'templates/**'
+      - 'Taskfile.yml'
+      - 'Taskfile.ss.yml'
+      - 'mise.toml'
+      - '.slopstopper.yml'
+      - '.slopstopper.yml.example'
+      - 'cli/slopstopper/data/profiles.json'
+
+# ── Claude Code skills shipped to adopters ──
+skills:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.claude/skills/**'
+
+# ── CI/CD ──
+ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**'

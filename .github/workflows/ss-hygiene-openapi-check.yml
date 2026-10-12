@@ -1,0 +1,97 @@
+name: SlopStopper · OpenAPI Drift Check
+
+# Compares the committed OpenAPI spec against the API it documents: the
+# operation set the live deployment publishes (`api.openapi.served_spec`)
+# and the reachability of every documented path that takes no parameters. It
+# is the API-shaped analogue of the docs-accuracy check. It catches the same
+# failure, a document that quietly became fiction, on another surface.
+# Triggers: PR, push to main, daily schedule, `deployment_status` events,
+# and manual dispatch. Emits a rolling PR comment. The workflow fails on
+# drift. There is no separate main-branch issue because the exit code is the
+# signal.
+# Docs: docs/hygiene/README.md.
+#
+# The only hygiene check that needs a URL. It still skips gracefully (exit
+# 0) when `api.openapi.spec` is unset, or points at a YAML spec the
+# dependency-free CLI can't parse.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  deployment_status:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Base URL of the API to audit'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openapi:
+    name: OpenAPI spec drift audit
+    if: |
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Determine audit URL
+        id: url
+        # CUSTOMISE FOR YOUR APP: point urls.preview (.slopstopper.yml) at the
+        # environment your PRs deploy to. The run skips with a notice when no
+        # URL resolves for an event, because the committed-vs-served check
+        # needs `api.openapi.served_spec` and a URL to probe documented paths.
+        # See .github/actions/ss-resolve-url for the event → URL table.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: skip
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          check: OpenAPI Drift Check
+
+      - name: Run OpenAPI drift audit
+        if: steps.url.outputs.skip == 'false'
+        id: audit
+        env:
+          TARGET_URL: ${{ steps.url.outputs.url }}
+        run: task ss:hygiene:openapi -- "$TARGET_URL"
+
+      - name: Upload OpenAPI drift report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: openapi-report-${{ github.run_id }}
+          path: .ss/reports/openapi/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Emit PR comment
+        if: github.event_name == 'pull_request' && steps.url.outputs.skip == 'false' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit hygiene:openapi --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
