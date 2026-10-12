@@ -1,0 +1,1 @@
+# slopstopper-snyk-safe
