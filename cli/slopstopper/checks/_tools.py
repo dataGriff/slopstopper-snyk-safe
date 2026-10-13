@@ -38,22 +38,32 @@ def npx_available() -> bool:
 
 
 def run_tailing_stderr(
-    cmd: list[str], tail_lines: int, env: dict[str, str] | None = None
+    cmd: list[str], tail_lines: int, env: dict[str, str] | None = None, merge_stdout: bool = False
 ) -> tuple[int, list[str]]:
     """Run `cmd`; return its exit code and the last non-blank lines of its stderr.
 
     stderr is echoed live, so the terminal shows the tool's progress, and
-    the tail is kept for the report. stdout is left attached. A command
-    that cannot start returns 127 with the OS error as its one line, as a
+    the tail is kept for the report. stdout is left attached unless
+    `merge_stdout`, which folds it into the same stream: for a tool that
+    prints its error message on stdout (Snyk does), the tail must carry
+    it or the report shows only the noise around it. A command that
+    cannot start returns 127 with the OS error as its one line, as a
     shell would. `env` replaces the process environment when given.
     """
     try:
         # why: `errors=` needs Python 3.6+; the CLI requires >=3.11.
-        proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, errors="replace", env=env)
+        if merge_stdout:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env
+            )
+            stream = proc.stdout
+        else:
+            proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, text=True, errors="replace", env=env)
+            stream = proc.stderr
     except OSError as exc:
         return 127, [str(exc)]
     tail: deque[str] = deque(maxlen=tail_lines)
-    for line in proc.stderr:
+    for line in stream:
         sys.stderr.write(line)
         if line.strip():
             tail.append(line.rstrip())

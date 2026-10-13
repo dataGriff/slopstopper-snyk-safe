@@ -152,7 +152,10 @@ def run(args: list[str], report_dir: Path, report_json: Path) -> tuple[int, list
     """
     report_dir.mkdir(parents=True, exist_ok=True)
     report_json.unlink(missing_ok=True)
-    return _tools.run_tailing_stderr([TOOL, *args], STDERR_TAIL_LINES, env=environment())
+    # Snyk prints its error catalogue entries (SNYK-0005 and friends) on
+    # stdout, so both streams feed the tail or the report shows only the
+    # binary wrapper's download chatter.
+    return _tools.run_tailing_stderr([TOOL, *args], STDERR_TAIL_LINES, env=environment(), merge_stdout=True)
 
 
 def run_to_file(args: list[str], report_dir: Path, out_path: Path) -> tuple[int, list[str]]:

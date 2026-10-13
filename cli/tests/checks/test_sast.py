@@ -184,6 +184,6 @@ def test_a_previous_runs_report_cannot_stand_in_for_this_one(monkeypatch, isolat
     sast.REPORT_DIR.mkdir(parents=True)
     sast.REPORT_SARIF.write_text(json.dumps(_sarif()))
     monkeypatch.setattr(sast, "_snyk_available", lambda: True)
-    monkeypatch.setattr(_snyk._tools, "run_tailing_stderr", lambda cmd, n, env=None: (2, ["crashed"]))
+    monkeypatch.setattr(_snyk._tools, "run_tailing_stderr", lambda cmd, n, env=None, merge_stdout=False: (2, ["crashed"]))
     assert sast.run() == 2
     assert not sast.REPORT_SARIF.exists()

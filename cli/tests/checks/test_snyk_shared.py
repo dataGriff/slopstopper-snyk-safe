@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -149,9 +150,10 @@ def test_run_removes_the_previous_report_and_passes_the_environment(monkeypatch,
     report.write_text("{}")
     seen = {}
 
-    def fake(cmd, tail, env=None):
+    def fake(cmd, tail, env=None, merge_stdout=False):
         seen["cmd"] = cmd
         seen["env"] = env
+        seen["merge_stdout"] = merge_stdout
         return 0, []
 
     monkeypatch.setattr(_tools, "run_tailing_stderr", fake)
@@ -159,6 +161,16 @@ def test_run_removes_the_previous_report_and_passes_the_environment(monkeypatch,
     assert not report.exists(), "a scan that dies must not leave last run's report behind"
     assert seen["cmd"] == ["snyk", "code", "test"]
     assert seen["env"]["SNYK_DISABLE_ANALYTICS"] == "1"
+    assert seen["merge_stdout"] is True, "Snyk reports its errors on stdout; the tail must carry them"
+
+
+def test_run_tailing_stderr_can_fold_stdout_into_the_tail(isolated_cwd):
+    rc, tail = _tools.run_tailing_stderr(
+        [sys.executable, "-c", "import sys; print('on stdout'); print('on stderr', file=sys.stderr); sys.exit(3)"],
+        5, merge_stdout=True,
+    )
+    assert rc == 3
+    assert set(tail) == {"on stdout", "on stderr"}
 
 
 def test_run_to_file_captures_stdout_and_tails_stderr(monkeypatch, isolated_cwd):
