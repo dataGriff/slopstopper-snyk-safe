@@ -114,6 +114,7 @@ jobs:
           echo "SEO_PAGES=$PAGES" >> "$GITHUB_ENV"
 
       - name: Run SEO metatag audit
+        if: steps.url.outputs.skip != 'true'
         id: audit
         env:
           TARGET_URL: ${{ steps.url.outputs.url }}
@@ -140,7 +141,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Emit PR comment
-        if: github.event_name == 'pull_request' && always()
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:seo --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

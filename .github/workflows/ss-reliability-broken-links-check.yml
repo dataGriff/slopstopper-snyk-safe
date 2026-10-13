@@ -132,6 +132,7 @@ jobs:
           echo "BROKEN_LINKS_PAGES=$PAGES" >> "$GITHUB_ENV"
 
       - name: Run broken-link checks
+        if: steps.url.outputs.skip != 'true'
         env:
           TARGET_URL: ${{ steps.url.outputs.url }}
           BROKEN_LINKS_PAGES: ${{ env.BROKEN_LINKS_PAGES }}
@@ -154,19 +155,19 @@ jobs:
           if-no-files-found: ignore
 
       - name: Comment on PR with results
-        if: github.event_name == 'pull_request' && always()
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:broken-links --target pr-comment --status ${{ steps.links.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
 
       - name: Emit issue on broken-links failure (main)
-        if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.url.outputs.skip != 'true' && failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:broken-links --target issue
 
       - name: Close broken-links issue on recovery (main)
-        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.url.outputs.skip != 'true' && success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:broken-links --target issue --on-pass=close

@@ -92,6 +92,7 @@ jobs:
           done
 
       - name: Run sitemap audit
+        if: steps.url.outputs.skip != 'true'
         id: audit
         # The check rebases every sitemap/llms `<loc>` onto the audited origin,
         # so it works the same against a localhost build or a deployed URL and
@@ -114,7 +115,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Emit PR comment
-        if: github.event_name == 'pull_request' && always()
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:sitemap --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

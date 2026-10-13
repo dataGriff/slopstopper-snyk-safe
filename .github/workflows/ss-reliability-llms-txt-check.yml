@@ -91,6 +91,7 @@ jobs:
           done
 
       - name: Run llms.txt audit
+        if: steps.url.outputs.skip != 'true'
         id: audit
         # Links inside llms.txt point at the production domain / GitHub, so
         # HEAD-verifying them from a localhost build tests reachability of
@@ -114,7 +115,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Emit PR comment
-        if: github.event_name == 'pull_request' && always()
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:llms-txt --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

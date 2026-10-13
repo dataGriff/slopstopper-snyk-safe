@@ -3,8 +3,6 @@
   "version": "1.0.0",
   "description": "SlopStopper (Snyk edition) - deterministic feedback for AI-driven development",
   "scripts": {
-    "build": "echo 'No build step: the browser checks serve the repo as-is.'",
-    "start": "slopstopper serve",
     "test": "slopstopper run reliability:smoke",
     "test:accessibility": "slopstopper run reliability:accessibility",
     "test:links": "slopstopper run reliability:broken-links"

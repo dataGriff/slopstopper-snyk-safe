@@ -134,6 +134,7 @@ jobs:
           echo "E2E_PAGES=$PAGES" >> "$GITHUB_ENV"
 
       - name: Walk the journeys
+        if: steps.url.outputs.skip != 'true'
         id: e2e
         env:
           TARGET_URL: ${{ steps.url.outputs.url }}
@@ -155,19 +156,19 @@ jobs:
           if-no-files-found: ignore
 
       - name: Comment on PR with results
-        if: github.event_name == 'pull_request' && always()
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:e2e --target pr-comment --status ${{ steps.e2e.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
 
       - name: Emit issue on E2E failure (main)
-        if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.url.outputs.skip != 'true' && failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:e2e --target issue
 
       - name: Close E2E issue on recovery (main)
-        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.url.outputs.skip != 'true' && success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:e2e --target issue --on-pass=close

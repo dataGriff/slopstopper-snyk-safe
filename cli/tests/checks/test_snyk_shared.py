@@ -20,6 +20,25 @@ def test_environment_disables_analytics_and_keeps_the_token(monkeypatch):
     assert env["SNYK_TOKEN"] == "t0k3n"
 
 
+def test_environment_drops_empty_snyk_variables(monkeypatch):
+    """A workflow passes `${{ secrets.SNYK_TOKEN }}` unconditionally, so an
+    unset secret arrives as an empty string that must not shadow the CLI's
+    own config or defaults."""
+    monkeypatch.setenv("SNYK_TOKEN", "")
+    monkeypatch.setenv("SNYK_API", "  ")
+    monkeypatch.setenv("SNYK_ORG", "acme")
+    env = _snyk.environment()
+    assert "SNYK_TOKEN" not in env and "SNYK_API" not in env
+    assert env["SNYK_ORG"] == "acme"
+
+
+def test_token_present_ignores_an_empty_value(monkeypatch):
+    monkeypatch.setenv("SNYK_TOKEN", "")
+    assert not _snyk.token_present()
+    monkeypatch.setenv("SNYK_TOKEN", "t")
+    assert _snyk.token_present()
+
+
 def test_org_args_is_empty_when_nothing_is_configured(monkeypatch, isolated_cwd):
     monkeypatch.delenv("SNYK_ORG", raising=False)
     assert _snyk.org_args() == []

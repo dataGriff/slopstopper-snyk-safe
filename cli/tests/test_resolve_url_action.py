@@ -34,7 +34,14 @@ esac
 
 
 def resolve(tmp_path, event, mode="local", url="", deployment="", fallback="local",
-            preview="", production="", cli_fails=False):
+            preview="", production="", cli_fails=False, site=True):
+    """Run the resolver in `tmp_path`. `site` lays down a `public/` root, the
+    bundled server's auto-detected static root; without it the repo has
+    nothing to serve and mode local skips."""
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    if site:
+        (repo / "public").mkdir(exist_ok=True)
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     stub = bindir / "slopstopper"
@@ -54,7 +61,7 @@ def resolve(tmp_path, event, mode="local", url="", deployment="", fallback="loca
         "STUB_FAIL": "1" if cli_fails else "",
     }
     proc = subprocess.run(["bash", "-e", "-o", "pipefail", str(script)], env=env,
-                          capture_output=True, text=True)
+                          cwd=repo, capture_output=True, text=True)
     outputs = dict(line.split("=", 1) for line in out.read_text().splitlines() if "=" in line)
     return proc.returncode, outputs, proc.stdout + proc.stderr
 
@@ -118,6 +125,44 @@ def test_local_mode(tmp_path, event, kwargs, expected):
     assert rc == 0, log
     for key, value in expected.items():
         assert outputs[key] == value, (key, outputs, log)
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push", "workflow_dispatch"])
+def test_local_mode_skips_when_there_is_nothing_to_serve(tmp_path, event):
+    """A library or an API has no static root and no build script, so the
+    browser check skips with a notice rather than serving an empty server."""
+    rc, outputs, log = resolve(tmp_path, event, mode="local", site=False)
+    assert rc == 0, log
+    assert outputs["skip"] == "true" and outputs["use_local"] == "false" and outputs["url"] == ""
+    assert "::notice::Nothing to serve for Test check" in log
+
+
+@pytest.mark.parametrize("root", ["dist/client", "dist", "build", "out", "public", "app"])
+def test_every_auto_detected_static_root_counts_as_a_site(tmp_path, root):
+    (tmp_path / "repo" / root).mkdir(parents=True)
+    rc, outputs, log = resolve(tmp_path, "pull_request", mode="local", site=False)
+    assert rc == 0 and outputs["use_local"] == "true", log
+
+
+def test_a_serve_root_counts_as_a_site(tmp_path, monkeypatch):
+    (tmp_path / "repo" / "site-out").mkdir(parents=True)
+    monkeypatch.setenv("SERVE_ROOT", "site-out")
+    rc, outputs, log = resolve(tmp_path, "pull_request", mode="local", site=False)
+    assert rc == 0 and outputs["use_local"] == "true", log
+
+
+def test_a_serve_root_that_does_not_exist_is_not_a_site(tmp_path, monkeypatch):
+    monkeypatch.setenv("SERVE_ROOT", "missing")
+    rc, outputs, log = resolve(tmp_path, "pull_request", mode="local", site=False)
+    assert rc == 0 and outputs["skip"] == "true", log
+
+
+@needs("node")
+def test_a_build_script_counts_as_a_site(tmp_path):
+    (tmp_path / "repo").mkdir(exist_ok=True)
+    (tmp_path / "repo" / "package.json").write_text('{"scripts": {"build": "vite build"}}')
+    rc, outputs, log = resolve(tmp_path, "pull_request", mode="local", site=False)
+    assert rc == 0 and outputs["use_local"] == "true", log
 
 
 @pytest.mark.parametrize(

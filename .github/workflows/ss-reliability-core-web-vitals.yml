@@ -99,6 +99,7 @@ jobs:
           done
 
       - name: Run Core Web Vitals audit
+        if: steps.audit-url.outputs.skip != 'true'
         id: cwv
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
@@ -129,13 +130,14 @@ jobs:
           if-no-files-found: warn
 
       - name: Comment on PR with results
-        if: github.event_name == 'pull_request' && always()
+        if: steps.audit-url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:cwv --target pr-comment --status ${{ steps.cwv.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
 
       - name: Open / update issue on CWV failure (main)
         if: |
+          steps.audit-url.outputs.skip != 'true' &&
           steps.cwv.outcome == 'failure' &&
           github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
@@ -144,6 +146,7 @@ jobs:
 
       - name: Close CWV failure issue on recovery
         if: |
+          steps.audit-url.outputs.skip != 'true' &&
           steps.cwv.outcome == 'success' &&
           github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:

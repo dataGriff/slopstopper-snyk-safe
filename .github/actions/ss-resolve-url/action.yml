@@ -25,7 +25,10 @@ description: >-
 #     deployment_status   → the deployment's URL (prod=true when it is
 #                           urls.production; a preview deploy is not)
 #     schedule            → urls.production (an error if unset) (prod=true)
-#     pull_request / push → http://localhost:8080, use_local=true
+#     pull_request / push → http://localhost:8080, use_local=true, when
+#                           the repo has something to serve (a static
+#                           root, SERVE_ROOT or a build script); else
+#                           a notice and skip=true
 #
 # The deployment's URL is its environment_url, falling back to target_url
 # (the workflows pass `environment_url || target_url`). Some providers,
@@ -71,7 +74,7 @@ outputs:
     description: The URL to audit (empty when skip=true)
     value: ${{ steps.resolve.outputs.url }}
   skip:
-    description: "`true` when no URL could be resolved for this event (mode skip)"
+    description: "`true` when no URL could be resolved for this event (mode skip), or when there is nothing to serve locally (mode local)"
     value: ${{ steps.resolve.outputs.skip }}
   use_local:
     description: "`true` when the workflow should build and serve the repo itself (mode local)"
@@ -110,7 +113,26 @@ runs:
           } >> "$GITHUB_OUTPUT"
         }
         audit() { require_http "$1"; emit "$1" false false "$2"; }
-        local_build() { emit "http://localhost:8080" false true false; }
+        # The bundled server auto-detects a static root (the same list as
+        # server.js) or an ejected SERVE_ROOT; a `build` script may produce
+        # one. With none of those the repo has no site to serve (a library,
+        # an API), so the browser check skips with a notice instead of
+        # starting a server that has nothing behind it.
+        servable() {
+          if [ -n "${SERVE_ROOT:-}" ]; then [ -d "$SERVE_ROOT" ]; return; fi
+          for d in dist/client dist build out public app; do
+            [ -d "$d" ] && return 0
+          done
+          [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)" 2>/dev/null
+        }
+        local_build() {
+          if servable; then
+            emit "http://localhost:8080" false true false
+          else
+            echo "::notice::Nothing to serve for ${CHECK}: no static root (dist/client, dist, build, out, public, app), no SERVE_ROOT and no build script. Set urls.preview / urls.production in .slopstopper.yml or add a site to enable it here."
+            emit "" true false false
+          fi
+        }
         # A dispatched or deployed URL is production when it is
         # urls.production (a deploy pipeline dispatching the live site
         # passes it that way). A preview deploy is not: CWV's prod config asserts

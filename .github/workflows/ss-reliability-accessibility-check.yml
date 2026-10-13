@@ -138,6 +138,7 @@ jobs:
           echo "ACCESSIBILITY_PAGES=$PAGES" >> "$GITHUB_ENV"
 
       - name: Run accessibility audit
+        if: steps.url.outputs.skip != 'true'
         id: audit
         env:
           TARGET_URL: ${{ steps.url.outputs.url }}
@@ -161,19 +162,19 @@ jobs:
           if-no-files-found: ignore
 
       - name: Comment on PR with results
-        if: github.event_name == 'pull_request' && always()
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:accessibility --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
 
       - name: Emit issue on accessibility failure (main)
-        if: failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.url.outputs.skip != 'true' && failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:accessibility --target issue
 
       - name: Close accessibility issue on recovery (main)
-        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.url.outputs.skip != 'true' && success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: slopstopper emit reliability:accessibility --target issue --on-pass=close

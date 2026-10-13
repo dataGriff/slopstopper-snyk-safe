@@ -71,10 +71,24 @@ def available() -> bool:
 
 
 def environment() -> dict[str, str]:
-    """The environment a scan runs with: the caller's, analytics off."""
-    env = dict(os.environ)
+    """The environment a scan runs with: the caller's, analytics off.
+
+    An empty `SNYK_*` variable is dropped rather than passed through. A
+    workflow sets `SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}` and the like
+    unconditionally, so an unset secret or variable reaches the step as
+    an empty string, and an empty `SNYK_API` or `SNYK_TOKEN` must not
+    shadow the CLI's own defaults and config.
+    """
+    env = {k: v for k, v in os.environ.items() if not (k.startswith("SNYK_") and v.strip() == "")}
     env["SNYK_DISABLE_ANALYTICS"] = "1"
     return env
+
+
+def token_present() -> bool:
+    """Whether a token reached the environment. Snyk can also be
+    authenticated through `snyk auth` config, so a missing token is a
+    warning before the run, not a refusal."""
+    return bool(os.environ.get("SNYK_TOKEN", "").strip())
 
 
 def org_args() -> list[str]:
