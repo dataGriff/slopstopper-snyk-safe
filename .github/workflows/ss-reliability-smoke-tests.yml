@@ -1,0 +1,153 @@
+name: SlopStopper · Reliability Smoke Tests
+
+# Runs Playwright smoke tests against the deployed site (or local
+# `slopstopper serve` for PR builds). Page list comes from pages.smoke in
+# .slopstopper.yml. Triggers: PR, push to main, hourly schedule,
+# `deployment_status` events, and manual dispatch. Failure raises a
+# main-branch tracking issue with the run URL; recovery auto-closes it.
+# There is no PR comment because the exit code is the signal.
+# Docs: docs/reliability/README.md.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  deployment_status:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to test (leave blank to test local build)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    if: |
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        # A stalled browser download otherwise holds the job until GitHub's
+        # six-hour limit. Each attempt gets five minutes and a stall is
+        # retried once; the step timeout bounds both attempts.
+        timeout-minutes: 12
+        run: |
+          for attempt in 1 2; do
+            if timeout --kill-after=30s 5m npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "::warning::Playwright browser install attempt ${attempt} failed or stalled after 5 minutes"
+          done
+          echo "::error::Playwright browser install failed twice. Re-run the job; if it keeps failing, check the runner's network."
+          exit 1
+
+      - name: Determine test URL
+        id: url
+        # CUSTOMISE FOR YOUR APP: urls.production / urls.preview in
+        # .slopstopper.yml. See .github/actions/ss-resolve-url for the
+        # event → URL table.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: local
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          check: Reliability Smoke Tests
+
+      - name: Start local server (PR / push builds)
+        if: steps.url.outputs.use_local == 'true'
+        # CUSTOMISE FOR YOUR APP: by default this runs `npm run build`
+        # then `slopstopper serve` (the bundled static server). Point
+        # SMOKE_TEST_URL at a deployed environment to skip the local
+        # serve. To use your own server, eject the bundled one with
+        # `slopstopper templates eject server.js` and edit `.ss/server.js`.
+        run: |
+          if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+            npm run build
+          fi
+          slopstopper serve &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 10); do
+            if curl -s http://localhost:8080 > /dev/null; then
+              echo "✅ Server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run smoke tests
+        if: steps.url.outputs.skip != 'true'
+        env:
+          TARGET_URL: ${{ steps.url.outputs.url }}
+        run: task ss:reliability:smoke -- "$TARGET_URL" --ci
+
+      - name: Stop local server
+        if: steps.url.outputs.use_local == 'true' && always()
+        run: kill "$SERVER_PID" || true
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-test-results-${{ github.run_id }}
+          path: |
+            playwright-report/
+            .ss/playwright-report/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Comment on deployment commit (if applicable)
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'deployment_status' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          URL: ${{ steps.url.outputs.url }}
+          STATUS: ${{ job.status }}
+        run: |
+          status_marker=$([ "$STATUS" = "success" ] && echo "✅ PASSED" || echo "❌ FAILED")
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" \
+            -f body="## Smoke Test Results ${status_marker}
+
+          Tested URL: ${URL}
+
+          [View detailed results](${run_url})"
+
+      - name: Emit issue on smoke failure
+        if: steps.url.outputs.skip != 'true' && failure() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:smoke --target issue
+
+      - name: Close smoke failure issue on recovery
+        if: steps.url.outputs.skip != 'true' && success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:smoke --target issue --on-pass=close

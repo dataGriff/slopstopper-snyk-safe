@@ -1,0 +1,34 @@
+version: '3'
+
+# Tasks for the slopstopper-cli Python package.
+# Internal: this Taskfile is NOT part of the distributed slopstopper
+# suite and is not seeded into adopter repos. CI (`.github/workflows/ci-cli.yml`)
+# and local development must both call the targets here so versions and
+# tooling stay in sync across contexts.
+#
+# Invoke from anywhere in the repo:
+#
+#   task -t cli/Taskfile.yml test
+#   task -t cli/Taskfile.yml test -- -k docs_size   # filter
+#
+# or from cli/:
+#
+#   task test
+
+tasks:
+  install:
+    desc: Create cli/.venv and install slopstopper-cli with test extras
+    cmds:
+      - test -d .venv || python3 -m venv .venv
+      - .venv/bin/pip install --quiet --upgrade pip
+      - .venv/bin/pip install --quiet -e '.[test]'
+    sources:
+      - pyproject.toml
+    generates:
+      - .venv/pyvenv.cfg
+
+  test:
+    desc: Run the pytest suite
+    deps: [install]
+    cmds:
+      - .venv/bin/pytest tests/ {{.CLI_ARGS}}

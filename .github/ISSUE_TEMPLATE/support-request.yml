@@ -1,0 +1,41 @@
+name: Support Request
+description: Ask a question or report a problem specific to this repository. Please read the support guide before opening an issue.
+labels: ["support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before you open this issue
+
+        Please work through the [Support Guide](../../docs/support/README.md) first:
+
+        1. **Ask an AI assistant.** Most questions can be answered immediately without an issue.
+        2. **If it's cross-repo or cross-team,** use a [Discussion](../../discussions/new) instead.
+
+        Only continue if the problem is specific to this repository and AI could not resolve it.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you need help with?
+      description: Describe the problem or question clearly. Include any error messages or unexpected behaviour.
+      placeholder: I was trying to… and expected… but instead…
+    validations:
+      required: true
+
+  - type: textarea
+    id: ai-steps
+    attributes:
+      label: What did you ask your AI assistant?
+      description: Paste the question(s) you asked and a summary of the answer you received.
+      placeholder: I asked the assistant "…" and it said "…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other information that might help, such as relevant files, screenshots, links to related issues or PRs.
+    validations:
+      required: false

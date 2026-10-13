@@ -1,0 +1,112 @@
+name: SlopStopper · Dependency Vulnerability Scan
+
+# Scans every manifest Snyk finds (`snyk test --all-projects`, the CLI
+# pinned in mise.toml) for known vulnerabilities and licence-policy
+# issues. The check itself is the gate: it exits 1 when a finding is at
+# or above `security.dependencies.fail_on` (default: high) and 2 when the
+# scan couldn't run. Triggers: PR, push to main, manual dispatch. Emits a
+# rolling PR comment and a main-branch tracking issue when blocking
+# findings land (exit 1 only). On main it also registers the dependency
+# graph with `snyk monitor`, which keeps the project on Snyk's dashboard
+# between pushes.
+#
+# Needs: the SNYK_TOKEN repository secret (a service-account token).
+# Optional repository variables: SNYK_ORG (the organisation slug to scan
+# under) and SNYK_API (a regional endpoint such as https://api.eu.snyk.io).
+# Docs: docs/security/README.md.
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    name: Scan Dependencies with Snyk Open Source
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, snyk, gitleaks) and
+        # the pinned slopstopper-cli (from source in the slopstopper repo).
+        # One local composite action; install.sh copies it in next to the
+        # workflows.
+        uses: ./.github/actions/ss-setup
+
+      # The check itself is the gate: it exits 1 on blocking findings, so
+      # this step's outcome IS the verdict. No separate detect / fail-job
+      # steps, and the local `task ss:security:dependencies` agrees with CI.
+      - name: Run dependency scan
+        id: dependencies
+        # `task -x` passes the CLI's exit code through (plain `task` maps
+        # every failure to 201). The code is kept as an output so later
+        # steps can tell findings (1) from could-not-run (2).
+        shell: bash
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_ORG: ${{ vars.SNYK_ORG }}
+          SNYK_API: ${{ vars.SNYK_API }}
+        run: |
+          set +e
+          task -x ss:security:dependencies
+          rc=$?
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit $rc
+
+      - name: Upload dependency reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependencies-reports
+          path: .ss/reports/dependencies/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Emit PR comment
+        if: always() && github.event_name == 'pull_request' && steps.dependencies.outcome != 'skipped'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit security:dependencies --target pr-comment --status ${{ steps.dependencies.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete
+
+      - name: Emit issue on main (if blocking findings)
+        # Only rc 1 is a finding. Exit 2 means the scan didn't run.
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.dependencies.outputs.rc == '1'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit security:dependencies --target issue
+
+      - name: Close issue on main when clean
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.dependencies.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit security:dependencies --target issue --on-pass=close
+
+      - name: Register the project with Snyk (main only)
+        # `snyk monitor` snapshots the dependency graph of main on the Snyk
+        # dashboard, so a vulnerability disclosed tomorrow is reported
+        # against today's main without waiting for the next push. Never on
+        # a PR: a branch snapshot would litter the dashboard with projects.
+        # Runs even when the scan found blocking issues (the dashboard must
+        # show main as it is, red included), but not when the scan could
+        # not run (exit 2: no token, no network), which would fail the same way.
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.dependencies.outputs.rc != '2'
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          SNYK_ORG: ${{ vars.SNYK_ORG }}
+          SNYK_API: ${{ vars.SNYK_API }}
+        run: task ss:security:monitor

@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "slopstopper-cli"
+version = "0.1.0"
+description = "A Python CLI plus GitHub Actions workflows that run Snyk-backed security scanning (Code, Open Source, IaC, SBOM), secrets detection, hygiene and reliability checks on every PR. Installed from a tagged checkout; enterprise fork of slopstopper."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Richard Griffiths" }]
+maintainers = [{ name = "Richard Griffiths", email = "griff182uk@googlemail.com" }]
+keywords = [
+  "ci",
+  "quality",
+  "checks",
+  "linting",
+  "security",
+  "accessibility",
+  "lighthouse",
+  "playwright",
+  "snyk",
+  "sbom",
+  "slopstopper",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
+  "Topic :: Security",
+  "Topic :: System :: Software Distribution",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX",
+  "Operating System :: MacOS",
+]
+dependencies = [
+  # `lizard` is invoked at runtime by hygiene:complexity via subprocess
+  # (`python -m lizard` against sys.executable). When slopstopper-cli is
+  # installed via pipx, sys.executable resolves to the pipx venv, which
+  # is where lizard must live too, otherwise `python -m lizard` fails
+  # even though `brew install lizard` (a different `lz4` tool) is on PATH.
+  # Promoting lizard from a test extra to a runtime dependency means
+  # pipx installs it into the same venv and the check works out of the box.
+  # Pinned exactly: a Lizard release can change complexity findings on the
+  # same commit, so it moves only in a reviewed bump (Dependabot, pip).
+  "lizard==1.24.1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=7",
+]
+
+[project.scripts]
+slopstopper = "slopstopper.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/dataGriff/slopstopper-snyk-safe"
+Source = "https://github.com/dataGriff/slopstopper-snyk-safe"
+Issues = "https://github.com/dataGriff/slopstopper-snyk-safe/issues"
+Documentation = "https://github.com/dataGriff/slopstopper-snyk-safe/blob/main/docs/README.md"
+Changelog = "https://github.com/dataGriff/slopstopper-snyk-safe/blob/main/CHANGELOG.md"
+Acknowledgements = "https://github.com/dataGriff/slopstopper-snyk-safe/blob/main/ATTRIBUTIONS.md"
+Upstream = "https://github.com/hungovercoders/slopstopper"
+
+[tool.hatch.build.targets.wheel]
+# `packages = ["slopstopper"]` includes the slopstopper/ tree (Python +
+# data files) automatically, so no `force-include` is needed; that block
+# caused a double-include error when building the wheel under hatchling.
+packages = ["slopstopper"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

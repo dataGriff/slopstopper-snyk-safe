@@ -1,0 +1,57 @@
+# Keeps the pinned dependencies moving, each bump as a reviewable PR.
+#
+# github-actions: every third-party action in the hand-written workflows
+# and the composite actions is pinned to a commit (`uses: owner/repo@<sha>
+# # vN`); Dependabot opens a PR when a new release lands, updating both the
+# SHA and the version comment. cli/tests/test_action_pins.py refuses a
+# floating ref, so a pin can only move through a PR like these.
+#
+# pip (cli/): the CLI's own runtime and test dependencies (pyproject.toml).
+# npm (/): Playwright and Lighthouse, which the browser checks run.
+#
+# The tool pins in mise.toml (snyk, gitleaks, node, task) are outside
+# Dependabot's ecosystems; Renovate's mise manager moves those, or a human
+# bumps them by hand. Each is an exact version on purpose: see mise.toml.
+#
+# Adopters don't need this file for the ss-* workflows and composite
+# actions: they are copied from here on every install.sh refresh, pins
+# included.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+    labels: ["ci", "maintenance"]
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: pip
+    directory: "/cli"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      pip:
+        patterns: ["*"]
+    labels: ["dependencies", "maintenance"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm:
+        patterns: ["*"]
+    labels: ["dependencies", "maintenance"]
+    commit-message:
+      prefix: "chore(deps)"

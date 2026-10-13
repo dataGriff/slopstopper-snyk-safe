@@ -1,0 +1,29 @@
+node_modules/
+playwright-report/
+test-results/
+.ss/playwright-report/
+.ss/test-results/
+# SlopStopper-generated reports (all under .ss/reports/<category>/).
+# Unanchored: checks write reports relative to CWD, so running the suite from
+# cli/ would otherwise leave an untracked cli/.ss/reports/ behind.
+**/.ss/reports/
+# Python bytecode under .ss/scripts/. .workflows-installed is deliberately
+# NOT ignored: it's the install marker that tracks adopter deletions
+# across re-runs and must be tracked.
+.ss/scripts/**/__pycache__/
+.ss/tests/**/__pycache__/
+# Run-time copies of the Playwright config + specs (they also self-ignore).
+.ss/.run/
+# CLI package build artefacts (in-tree CLI pivot; see cli/README.md)
+cli/**/__pycache__/
+cli/*.egg-info/
+cli/build/
+cli/dist/
+cli/.venv/
+cli/.pytest_cache/
+.task/
+# Local Claude Code state, but ship shared skills with the repo
+.claude/*
+!.claude/skills/
+# Lighthouse CI output (reliability:cwv writes here; uploaded as an artifact)
+.lighthouseci/

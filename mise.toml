@@ -1,0 +1,27 @@
+# mise toolchain for the slopstopper suite.
+#
+# Every tool version the checks and workflows depend on is pinned here,
+# and only here: local runs (`mise install`) and CI (jdx/mise-action in
+# .github/actions/ss-setup) read the same file, so there is one version of
+# each tool everywhere and nothing is resolved to "latest" on a runner.
+#
+# `snyk` and `gitleaks` are pinned to EXACT versions on purpose. A security
+# scanner that floats changes its findings between two runs of the same
+# commit, and an enterprise reviewer needs to say which scanner version
+# produced a given report. Dependabot or Renovate should move these pins
+# (each bump is a reviewable PR); do not loosen them to a major or a range.
+#
+# The slopstopper CLI itself is not a mise tool: adopter repos pin it to a
+# git tag under `cli:` in .slopstopper.yml (see .github/actions/ss-setup),
+# and this repo, which IS the CLI, installs cli/ editable and runs HEAD.
+#
+# `node` lives here too: it's a tool version, so it belongs in mise, not
+# .slopstopper.yml. mise installs it per-directory locally and CI gets it
+# from the same pin, with no separate setup-node step or repo variable.
+[tools]
+"task" = "3"
+"node" = "20"
+# Snyk CLI (Snyk Code, Open Source, IaC, SBOM). Exact pin: deliberate.
+"npm:snyk" = "1.1308.0"
+# Gitleaks (secrets detection). Exact pin: deliberate.
+"gitleaks" = "8.30.1"

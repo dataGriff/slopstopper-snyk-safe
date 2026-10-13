@@ -1,0 +1,59 @@
+# .slopstopper.yml: this repository's own config.
+#
+# See .slopstopper.yml.example for the fully-annotated schema reference.
+#
+# This repo IS slopstopper-cli, so there is no `cli:` pin here: the
+# workflows install cli/ editable (`pip install -e ./cli`) and run HEAD.
+# An adopter repo pins an exact tag instead; the block looks like this:
+#
+# cli:
+#   source: https://github.com/dataGriff/slopstopper-snyk-safe.git
+#   ref: v0.1.0
+#
+# The scanner versions (snyk, gitleaks) and node live in mise.toml. They
+# are tool versions, so they live in mise, not here.
+
+# A CLI and a set of workflows: nothing is deployed, nothing serves HTML,
+# so the static layer is the whole of what applies. `library` drops every
+# check that needs a URL. See .slopstopper.yml.example for ui/api.
+profile: library
+
+security:
+  snyk:
+    # The Snyk organisation to scan under. SNYK_ORG in the environment
+    # wins when both are set; SNYK_TOKEN and SNYK_API are env-only.
+    # Left unset here: this repo's CI sets SNYK_ORG as a repository
+    # variable, so a fork scanning under its own org needs no edit.
+    # org: my-org-slug
+  sast:
+    fail_on: high
+  dependencies:
+    fail_on: high
+  iac:
+    fail_on: high
+  sbom:
+    format: cyclonedx1.5+json
+    allow_empty: false
+
+# The docs-size defaults (150 KB total / 25 files) were set when the suite
+# had noticeably fewer checks. Every check legitimately costs a section in
+# its category README, so this repo, which documents all 25, sits above
+# them. The advisory is still useful as a growth signal, so the ceiling is
+# raised rather than removed; the per-file 20 KB cap is untouched, because
+# that one is about a single document staying readable.
+hygiene:
+  docs_size:
+    # Advisory totals, sized to this repo. Under AGENTS.md-first the
+    # entry files stay small and docs/ holds the routed detail, so these
+    # track docs/ as it is; the structural budgets (entry-files tokens,
+    # docs-structure lines and hops) are the ones that never move. Change
+    # these only in a commit that says why.
+    max_total_size_kb: 210
+    max_files: 35
+  # Every piece of skill drift the repo review found lived in a file the
+  # docs/-only scan never read. Scan the skills too.
+  docs_accuracy:
+    extra_paths: [.claude/skills/**/*.md]
+
+workflows:
+  disabled: []

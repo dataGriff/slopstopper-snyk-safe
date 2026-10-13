@@ -1,0 +1,102 @@
+name: SlopStopper · API Latency Check
+
+# Samples each endpoint in `api.latency.paths` several times and reports the
+# median and slowest response, plus the payload size. The API-shaped
+# analogue of Core Web Vitals: there is no rendering on a JSON API, so the
+# answerable question is how long the endpoint takes and how much it sends
+# back. Triggers: PR, push to main, daily schedule, `deployment_status`
+# events, and manual dispatch. Emits a rolling PR comment. The workflow
+# fails when an endpoint is unreachable or a configured budget is exceeded.
+# There is no separate main-branch issue because the exit code is the
+# signal.
+# Docs: docs/reliability/README.md.
+#
+# Budgets are opt-in: with none set the check reports timings and exits 0.
+# Reachability is not opt-in. A non-2xx endpoint fails regardless, because a
+# timing taken from an error response is not a measurement.
+#
+# Like the other API workflows this never tries to build and serve the repo
+# locally: it audits a URL you point it at (urls.preview on PRs,
+# urls.production on main/schedule) and skips cleanly when neither is
+# configured.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  deployment_status:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Base URL of the API to sample'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-latency:
+    name: API latency and payload budget audit
+    if: |
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Determine audit URL
+        id: url
+        # CUSTOMISE FOR YOUR APP: point urls.preview (.slopstopper.yml) at the
+        # environment your PRs deploy to. Timings from a preview environment
+        # are noisier than production ones, so derive budgets from what you
+        # actually observe there or the check becomes noise. See
+        # .github/actions/ss-resolve-url for the event → URL table.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: skip
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          check: API Latency Check
+
+      - name: Run API latency audit
+        if: steps.url.outputs.skip == 'false'
+        id: audit
+        env:
+          TARGET_URL: ${{ steps.url.outputs.url }}
+        run: task ss:reliability:api-latency -- "$TARGET_URL"
+
+      - name: Upload API latency report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-latency-report-${{ github.run_id }}
+          path: .ss/reports/api-latency/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Emit PR comment
+        if: github.event_name == 'pull_request' && steps.url.outputs.skip == 'false' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:api-latency --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

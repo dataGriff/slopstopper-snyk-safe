@@ -1,0 +1,121 @@
+name: SlopStopper · sitemap Check
+
+# Crawls the deployed site from `/` and cross-checks sitemap.xml against the
+# pages it actually reaches: a reachable page missing from the sitemap or a
+# `<loc>` that 404s hard-fails (drift); llms.txt page gaps are advisory.
+# Both flat and nested (sitemap-index) shapes are supported. Triggers: PR,
+# push to main, daily schedule, `deployment_status` events, and manual
+# dispatch. Emits a rolling PR comment; the workflow fails on drift (exit
+# code is the signal, no separate main-branch issue).
+# Docs: docs/reliability/SITEMAP.md.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  deployment_status:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL to audit (leave blank to audit local build)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sitemap:
+    name: sitemap completeness audit
+    if: |
+      github.event_name != 'deployment_status' ||
+      github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up slopstopper
+        # Python, the mise-pinned toolchain (task, node, slopstopper-cli) and,
+        # in the slopstopper repo only, the CLI from source. One local
+        # composite action; install.sh copies it in next to the workflows.
+        uses: ./.github/actions/ss-setup
+
+      - name: Determine audit URL
+        id: url
+        # CUSTOMISE FOR YOUR APP: urls.production / urls.preview in
+        # .slopstopper.yml. See .github/actions/ss-resolve-url for the
+        # event → URL table.
+        uses: ./.github/actions/ss-resolve-url
+        with:
+          mode: local
+          url: ${{ github.event.inputs.url }}
+          deployment-url: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          check: sitemap Check
+
+      - name: Install dependencies (local build only)
+        if: steps.url.outputs.use_local == 'true'
+        run: npm ci
+
+      - name: Start local server (PR / push builds)
+        if: steps.url.outputs.use_local == 'true'
+        # CUSTOMISE FOR YOUR APP: by default this runs `npm run build`
+        # then `slopstopper serve` (the bundled static server). Point
+        # SITEMAP_TEST_URL at a deployed environment to skip the local
+        # serve, or eject the bundled server with
+        # `slopstopper templates eject server.js` and customise `.ss/server.js`.
+        run: |
+          if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+            npm run build
+          fi
+          slopstopper serve &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 10); do
+            if curl -s http://localhost:8080 > /dev/null; then
+              echo "✅ Server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run sitemap audit
+        if: steps.url.outputs.skip != 'true'
+        id: audit
+        # The check rebases every sitemap/llms `<loc>` onto the audited origin,
+        # so it works the same against a localhost build or a deployed URL and
+        # never HEADs the production domain from a local run.
+        env:
+          TARGET_URL: ${{ steps.url.outputs.url }}
+        run: task ss:reliability:sitemap -- "$TARGET_URL"
+
+      - name: Stop local server
+        if: steps.url.outputs.use_local == 'true' && always()
+        run: kill "$SERVER_PID" || true
+
+      - name: Upload sitemap report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sitemap-report-${{ github.run_id }}
+          path: .ss/reports/sitemap/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Emit PR comment
+        if: steps.url.outputs.skip != 'true' && github.event_name == 'pull_request' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: slopstopper emit reliability:sitemap --target pr-comment --status ${{ steps.audit.outcome == 'success' && 'pass' || 'fail' }} --on-pass=delete

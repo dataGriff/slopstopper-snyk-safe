@@ -1,0 +1,33 @@
+# slopstopper security headers begin
+#
+# Seeded by slopstopper install.sh. The block is wrapped with the
+# begin/end markers above and below so re-runs detect "already
+# appended" and don't duplicate the block. Adopters can move, edit, or
+# delete the entries between the markers. The idempotency check only
+# needs the begin marker line to survive.
+#
+# Native _headers format, served per response by Netlify, Cloudflare
+# Pages and other static hosts that read public/_headers. Uncomment
+# the entries to enable a slopstopper-baseline security header policy.
+#
+# The CSP below is opinionated for static sites that load Google Tag
+# Manager. Tune `script-src` and `connect-src` to the third parties
+# *your* site actually loads. Document any per-page CSP relaxations in
+# docs/security/CSP_EXCEPTIONS.md and slopstopper's
+# ss:hygiene:csp-exceptions check will keep them honest.
+#
+# CRITICAL: edit before uncommenting. These are defaults, not law.
+
+# /*
+#   X-Content-Type-Options: nosniff
+#   X-Frame-Options: DENY
+#   Referrer-Policy: strict-origin-when-cross-origin
+#   Permissions-Policy: geolocation=(), camera=(), microphone=(), interest-cohort=()
+#   Cross-Origin-Opener-Policy: same-origin
+#   Cross-Origin-Resource-Policy: same-origin
+#   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://*.googletagmanager.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://*.google-analytics.com https://*.googletagmanager.com; font-src 'self' data:; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# /og-image.png
+#   Cross-Origin-Resource-Policy: cross-origin
+
+# slopstopper security headers end
