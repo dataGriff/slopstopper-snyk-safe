@@ -101,7 +101,10 @@ jobs:
         # dashboard, so a vulnerability disclosed tomorrow is reported
         # against today's main without waiting for the next push. Never on
         # a PR: a branch snapshot would litter the dashboard with projects.
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        # Runs even when the scan found blocking issues (the dashboard must
+        # show main as it is, red included), but not when the scan could
+        # not run (exit 2: no token, no network), which would fail the same way.
+        if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.dependencies.outputs.rc != '2'
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
           SNYK_ORG: ${{ vars.SNYK_ORG }}

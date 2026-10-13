@@ -134,6 +134,19 @@ def blocking(findings: list[dict], gate: str, severity_of=None) -> list[dict]:
     return [f for f in findings if rank(read(f)) >= threshold]
 
 
+def partition(findings: list[dict], gate: str, severity_of=None) -> tuple[list[dict], list[dict]]:
+    """(blocking, rest): one pass by rank, the same split `blocking` makes."""
+    read = severity_of or (lambda f: f.get("severity"))
+    if gate == "none":
+        return [], list(findings)
+    threshold = SEVERITY_RANK[gate]
+    blocking: list[dict] = []
+    rest: list[dict] = []
+    for finding in findings:
+        (blocking if rank(read(finding)) >= threshold else rest).append(finding)
+    return blocking, rest
+
+
 def count_by_severity(findings: list[dict], severity_of=None) -> dict[str, int]:
     read = severity_of or (lambda f: f.get("severity"))
     counts = {s: 0 for s in SEVERITY_RANK}
@@ -164,7 +177,9 @@ def run_to_file(args: list[str], report_dir: Path, out_path: Path) -> tuple[int,
 
     For the one command (`snyk sbom`) whose product is its stdout. A
     command that cannot start returns 127 with the OS error as its one
-    line, and an empty file is removed so it never reads as a report.
+    line. When the command fails, what it wrote to stdout is its error
+    text (Snyk prints its error catalogue there), so the file is removed,
+    never uploaded under the SBOM's name, and its lines join the tail.
     """
     import subprocess
 
@@ -179,9 +194,14 @@ def run_to_file(args: list[str], report_dir: Path, out_path: Path) -> tuple[int,
     except OSError as exc:
         out_path.unlink(missing_ok=True)
         return 127, [str(exc)]
-    if out_path.exists() and out_path.stat().st_size == 0:
-        out_path.unlink()
-    lines = [ln.rstrip() for ln in (proc.stderr or "").splitlines() if ln.strip()]
+    output_text = ""
+    if proc.returncode != 0 or (out_path.exists() and out_path.stat().st_size == 0):
+        try:
+            output_text = out_path.read_text(errors="replace")
+        except OSError:
+            output_text = ""
+        out_path.unlink(missing_ok=True)
+    lines = [ln.rstrip() for ln in (output_text + "\n" + (proc.stderr or "")).splitlines() if ln.strip()]
     return proc.returncode, lines[-STDERR_TAIL_LINES:]
 
 

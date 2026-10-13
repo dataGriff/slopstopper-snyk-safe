@@ -518,22 +518,22 @@ tasks:
   security:monitor:
     desc: Register the repo's dependency graph with the Snyk dashboard (main only)
     summary: |
-      Runs `snyk monitor --all-projects`, which snapshots the dependency
-      graph on the Snyk dashboard so a vulnerability disclosed later is
-      reported against the code as of this run. Not a check: it has no
-      verdict and writes no report, and the dependencies workflow runs it
-      only for a push to main, so the dashboard never fills with branch
-      snapshots. Passes `--org` when SNYK_ORG is set.
+      Runs `snyk monitor --all-projects` through `slopstopper monitor`, so
+      it uses the organisation the Snyk checks use (`security.snyk.org` in
+      .slopstopper.yml, or SNYK_ORG) and the same environment handling. It
+      snapshots the dependency graph on the Snyk dashboard so a
+      vulnerability disclosed later is reported against the code as of
+      this run. Not a check: it has no verdict and writes no report, and
+      the dependencies workflow runs it only for a push to main, so the
+      dashboard never fills with branch snapshots.
 
       Needs SNYK_TOKEN in the environment. SNYK_ORG and SNYK_API are
       optional.
 
       Usage:
-        SNYK_TOKEN=... SNYK_ORG=my-org task ss:security:monitor
-    env:
-      SNYK_DISABLE_ANALYTICS: "1"
+        SNYK_TOKEN=... task ss:security:monitor
     cmds:
-      - snyk monitor --all-projects {{if .SNYK_ORG}}--org={{.SNYK_ORG}}{{end}}
+      - slopstopper monitor
 
   security:secrets:
     desc: Run secrets detection using Gitleaks

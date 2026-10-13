@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 
 import pytest
@@ -879,7 +880,7 @@ def test_doctor_json_names_the_missing_tool_and_its_hint(isolated_cwd, capsys, m
     assert data["ok"] is False
     snyk = next(row for row in data["tools"] if row["tool"] == "snyk")
     assert snyk["status"] == "missing"
-    assert snyk["needed_by"] == "security:dependencies"
+    assert snyk["needed_by"] == "security:sast, security:dependencies, security:iac, security:sbom"
     assert snyk["problem"] == "not installed"
     assert "snyk" in snyk["hint"]
     assert data["workflows"]["checked"] is False
@@ -896,6 +897,60 @@ def test_doctor_json_marks_a_tool_only_a_dropped_check_needs_as_skipped(isolated
     data = json.loads(capsys.readouterr().out)
     gitleaks = next(row for row in data["tools"] if row["tool"] == "gitleaks")
     assert gitleaks["status"] == "skipped"
+
+
+def test_doctor_keeps_snyk_required_while_any_snyk_check_is_on(isolated_cwd, capsys, monkeypatch):
+    """snyk serves four checks; disabling one of them does not make it optional."""
+    import json
+
+    monkeypatch.setattr(cli.shutil, "which", lambda tool: None if tool == "snyk" else "/x")
+    monkeypatch.setattr(cli, "_probe_tool", lambda _: (True, ""))
+    _no_github(monkeypatch)
+    monkeypatch.setattr(cli, "_check_is_disabled", lambda name, disabled: name == "security:dependencies")
+    assert cli.main(["doctor", "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert next(row for row in data["tools"] if row["tool"] == "snyk")["status"] == "missing"
+    monkeypatch.setattr(cli, "_check_is_disabled", lambda name, disabled: name.startswith("security:"))
+    assert cli.main(["doctor", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert next(row for row in data["tools"] if row["tool"] == "snyk")["status"] == "skipped"
+
+
+def test_monitor_runs_snyk_with_the_shared_org_and_environment(write_config, monkeypatch, capsys):
+    from slopstopper.checks import _snyk
+
+    write_config("security:\n  snyk:\n    org: acme\n")
+    monkeypatch.delenv("SNYK_ORG", raising=False)
+    monkeypatch.setenv("SNYK_API", "")
+    monkeypatch.setattr(_snyk, "available", lambda: True)
+    seen = {}
+
+    def fake_run(cmd, env, check):
+        seen["cmd"], seen["env"] = cmd, env
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    assert cli.main(["monitor"]) == 0
+    assert seen["cmd"] == ["snyk", "monitor", "--all-projects", "--org=acme"]
+    assert "SNYK_API" not in seen["env"] and seen["env"]["SNYK_DISABLE_ANALYTICS"] == "1"
+    assert "Snyk accepted the snapshot" in capsys.readouterr().out
+
+
+def test_monitor_is_could_not_run_when_snyk_rejects_it(isolated_cwd, monkeypatch, capsys):
+    from slopstopper.checks import _snyk
+
+    monkeypatch.setattr(_snyk, "available", lambda: True)
+    monkeypatch.setattr(cli.subprocess, "run", lambda cmd, env, check: subprocess.CompletedProcess(cmd, 2))
+    assert cli.main(["monitor"]) == 2
+    assert "dashboard was not updated" in capsys.readouterr().out
+
+
+def test_monitor_is_could_not_run_without_snyk(isolated_cwd, monkeypatch, capsys):
+    from slopstopper.checks import _snyk
+
+    monkeypatch.setattr(_snyk, "available", lambda: False)
+    assert cli.main(["monitor"]) == 2
+    assert "snyk is not installed" in capsys.readouterr().out
 
 
 def test_doctor_json_reports_an_inactive_workflow(isolated_cwd, capsys, monkeypatch):

@@ -906,7 +906,10 @@ OBSOLETE_WORKFLOWS=(
   "ss-hygiene-doc-updater.md"
   "ss-hygiene-doc-updater.lock.yml"
 )
-OBSOLETE_FILES=(
+# Files earlier suites seeded that nothing here reads any more. They are
+# never deleted: an adopter may have tuned them or use them with the tool
+# outside this suite, so the refresh only says they are unused.
+UNUSED_FILES=(
   ".zap/rules.tsv"
 )
 
@@ -916,11 +919,9 @@ for obsolete in "${OBSOLETE_WORKFLOWS[@]}"; do
     info "removed obsolete workflow .github/workflows/$obsolete (no longer shipped by this suite)"
   fi
 done
-for obsolete in "${OBSOLETE_FILES[@]}"; do
-  if [ -f "$TARGET_DIR/$obsolete" ]; then
-    rm -f "$TARGET_DIR/$obsolete"
-    rmdir "$TARGET_DIR/$(dirname "$obsolete")" 2>/dev/null || true
-    info "removed obsolete file $obsolete (nothing in this suite reads it)"
+for unused in "${UNUSED_FILES[@]}"; do
+  if [ -f "$TARGET_DIR/$unused" ]; then
+    info "$unused is not read by this suite any more (ZAP DAST is not shipped); keep it for your own ZAP use or delete it"
   fi
 done
 

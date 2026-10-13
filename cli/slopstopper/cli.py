@@ -38,6 +38,12 @@ Subcommands:
                                     Walk the registry and show every check's
                                     name + one-line description. Useful for
                                     discoverability before running.
+  monitor                           Run `snyk monitor --all-projects` with the
+                                    same organisation and environment the
+                                    Snyk checks use (security.snyk.org or
+                                    SNYK_ORG; empty SNYK_* dropped; analytics
+                                    off). The dependencies workflow runs it
+                                    on main.
   doctor [--json]                   Verify install state: which external
                                     tools are present and run (node, gh,
                                     snyk, gitleaks), and which ss-*
@@ -165,6 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_badges(sub)
     _add_serve(sub)
     _add_checks(sub)
+    _add_monitor(sub)
     _add_doctor(sub)
     _add_profile(sub)
 
@@ -492,6 +499,21 @@ def _add_checks(sub) -> None:
     )
 
 
+def _add_monitor(sub) -> None:
+    sub.add_parser(
+        "monitor",
+        help="Register the dependency graph with the Snyk dashboard (snyk monitor)",
+        description=(
+            "Run `snyk monitor --all-projects` under the organisation the Snyk\n"
+            "checks use (`security.snyk.org` in .slopstopper.yml, or SNYK_ORG),\n"
+            "with the same environment handling: an empty SNYK_* variable is\n"
+            "dropped and analytics are off. Not a check: no verdict, no report.\n"
+            "Exit 0 when Snyk accepted the snapshot, 2 when it could not run.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
 def _add_doctor(sub) -> None:
     p = sub.add_parser(
         "doctor",
@@ -617,6 +639,7 @@ _DISPATCHERS = {
     "badges":    lambda a: _dispatch_badges(a.owner, a.repo, a.no_advert),
     "serve":     lambda a: _dispatch_serve(),
     "checks":    lambda a: _dispatch_checks_list(a.category, a.json),
+    "monitor":   lambda a: _dispatch_monitor(),
     "doctor":    lambda a: _dispatch_doctor(as_json=a.json),
     "profile":   lambda a: _dispatch_profile(a.profile_action, getattr(a, "name", None), as_json=a.json),
 }
@@ -843,6 +866,27 @@ def _dispatch_badges(owner: str | None, repo: str | None, no_advert: bool) -> in
     return 0
 
 
+def _dispatch_monitor() -> int:
+    """`snyk monitor --all-projects` through the Snyk checks' shared plumbing."""
+    from slopstopper.checks import _snyk
+
+    if not _snyk.available():
+        output.error(_snyk.INSTALL_HELP)
+        return EXIT_CANNOT_RUN
+    cmd = [_snyk.TOOL, "monitor", "--all-projects", *_snyk.org_args()]
+    output.running("Registering the dependency graph with Snyk…")
+    try:
+        rc = subprocess.run(cmd, env=_snyk.environment(), check=False).returncode
+    except OSError as exc:
+        output.error(f"snyk could not start: {exc}")
+        return EXIT_CANNOT_RUN
+    if rc != 0:
+        output.error(f"snyk monitor exited {rc}; the dashboard was not updated (is SNYK_TOKEN set?)")
+        return EXIT_CANNOT_RUN
+    output.success("Snyk accepted the snapshot")
+    return EXIT_PASS
+
+
 def _dispatch_serve() -> int:
     """Replace the current process with `node <bundled or ejected server.js>`.
 
@@ -1010,11 +1054,17 @@ def _dispatch_checks_list(category: str | None, as_json: bool) -> int:
 # is now a runtime dependency of slopstopper-cli (see pyproject.toml),
 # so it's always in the venv that `python -m lizard` resolves against.
 # Doctor no longer needs to check for it.
-_DOCTOR_TOOLS: list[tuple[str, str | None, str]] = [
-    ("node", None, "Install Node.js (https://nodejs.org/), which Playwright, Lighthouse and the server need"),
-    ("gh", None, "Install GitHub CLI (https://cli.github.com/), which `slopstopper emit` needs"),
-    ("snyk", "security:dependencies", "mise install (npm:snyk is pinned in mise.toml)  or  npm install -g snyk; then set SNYK_TOKEN"),
-    ("gitleaks", "security:secrets", "mise install (gitleaks is pinned in mise.toml)  or  brew install gitleaks"),
+# (tool, the checks that need it, install hint). A tool is skipped only
+# when every check that needs it is one this repo doesn't carry.
+_DOCTOR_TOOLS: list[tuple[str, tuple[str, ...], str]] = [
+    ("node", (), "Install Node.js (https://nodejs.org/), which Playwright, Lighthouse and the server need"),
+    ("gh", (), "Install GitHub CLI (https://cli.github.com/), which `slopstopper emit` needs"),
+    (
+        "snyk",
+        ("security:sast", "security:dependencies", "security:iac", "security:sbom"),
+        "mise install (npm:snyk is pinned in mise.toml)  or  npm install -g snyk; then set SNYK_TOKEN",
+    ),
+    ("gitleaks", ("security:secrets",), "mise install (gitleaks is pinned in mise.toml)  or  brew install gitleaks"),
 ]
 
 
@@ -1063,7 +1113,7 @@ def _doctor_tool_rows(disabled: set[str]) -> list[dict]:
         path = shutil.which(tool)
         row = {
             "tool": tool,
-            "needed_by": needed_by,
+            "needed_by": ", ".join(needed_by) if needed_by else None,
             "path": path,
             "version": None,
             "status": "ok",
@@ -1081,7 +1131,7 @@ def _doctor_tool_rows(disabled: set[str]) -> list[dict]:
         else:
             row["problem"] = "not installed"
             row["status"] = "missing"
-        if needed_by and _check_is_disabled(needed_by, disabled):
+        if needed_by and all(_check_is_disabled(check, disabled) for check in needed_by):
             row["status"] = "skipped"
         rows.append(row)
     return rows

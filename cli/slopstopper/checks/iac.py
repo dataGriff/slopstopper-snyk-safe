@@ -135,7 +135,7 @@ def _build_md_report(files: list[dict], gate: str, nothing_to_scan: bool = False
     if nothing_to_scan:
         return md + _snyk.nothing_supported_md("Snyk IaC", "infrastructure-as-code files")
     findings = _findings(files)
-    blocking = _snyk.blocking(findings, gate)
+    blocking, rest = _snyk.partition(findings, gate)
     md += "## Summary\n\n"
     md += f"Scanned {len(files)} file(s).\n\n"
     unparsed = _unparsed(files)
@@ -152,7 +152,7 @@ def _build_md_report(files: list[dict], gate: str, nothing_to_scan: bool = False
             md += f"| {sev.capitalize()} | {counts[sev]} |\n"
         md += "\n"
         md += _format_section(blocking, f"Blocking findings (at or above `fail_on: {gate}`)", "🔴")
-        md += _format_section([f for f in findings if f not in blocking], "Findings below the gate", "⚠️")
+        md += _format_section(rest, "Findings below the gate", "⚠️")
     md += "## Guidelines\n\n"
     if gate == "none":
         md += "- **Blocking**: nothing, because `security.iac.fail_on: none` reports findings without failing\n"

@@ -150,6 +150,20 @@ def test_a_failed_scan_is_could_not_run(monkeypatch, isolated_cwd):
     assert "Scan did not complete" in md and "SNYK_TOKEN" in md
 
 
+def test_an_unscannable_manifest_is_named_in_the_report(monkeypatch, isolated_cwd):
+    """One manifest Snyk could not resolve makes the scan not-run, and the
+    report says which one and why rather than 'no readable report'."""
+    _stub_snyk(monkeypatch, 2, [
+        _project("package.json"),
+        {"ok": False, "error": "Required packages missing: could not resolve lxml", "path": "docs/requirements.txt"},
+    ])
+    assert dependencies.run() == 2
+    md = dependencies.REPORT_MD.read_text()
+    assert "Snyk could not scan these manifests" in md
+    assert "`docs/requirements.txt`: Required packages missing: could not resolve lxml" in md
+    assert "wrote no readable report" not in md
+
+
 def test_a_report_written_with_a_fatal_exit_is_not_a_pass(monkeypatch, isolated_cwd):
     _stub_snyk(monkeypatch, 2, [_project("package.json")])
     assert dependencies.run() == 2

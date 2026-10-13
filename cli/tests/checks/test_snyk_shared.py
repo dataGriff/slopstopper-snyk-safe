@@ -202,6 +202,24 @@ def test_run_to_file_removes_an_empty_output(monkeypatch, isolated_cwd):
     assert not out_path.exists()
 
 
+def test_run_to_file_turns_a_failed_commands_stdout_into_the_tail(monkeypatch, isolated_cwd):
+    """Snyk prints its error on stdout; a failed `snyk sbom` must not leave
+    that text under the SBOM's filename, and the report must quote it."""
+    import subprocess
+
+    out_path = Path(".ss/reports/sbom/sbom.json")
+
+    def fake_run(cmd, stdout, stderr, text, errors, env, check):
+        stdout.write(" ERROR   Authentication error (SNYK-0005)\nStatus:  401 Unauthorized\n")
+        return subprocess.CompletedProcess(cmd, 2, stdout=None, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    rc, tail = _snyk.run_to_file(["sbom"], out_path.parent, out_path)
+    assert rc == 2
+    assert not out_path.exists()
+    assert "Status:  401 Unauthorized" in tail
+
+
 def test_run_to_file_reports_an_exec_failure(monkeypatch, isolated_cwd):
     import subprocess
 

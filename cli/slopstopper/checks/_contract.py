@@ -124,8 +124,9 @@ def scan_incomplete(report_dir: Path, report_md: Path, title: str, detail: str) 
 
 
 def stderr_tail_md(tool: str, stderr_tail: list[str]) -> str:
-    """The stderr block of an incomplete-scan report: what the tool last said."""
+    """The output block of an incomplete-scan report: what the tool last
+    said, on whichever stream the caller captured."""
     if not stderr_tail:
-        return f"{tool} printed nothing to stderr."
+        return f"{tool} printed nothing."
     body = "\n".join(stderr_tail)
-    return f"The last {len(stderr_tail)} line(s) {tool} printed to stderr:\n\n```text\n{body}\n```"
+    return f"The last {len(stderr_tail)} line(s) {tool} printed:\n\n```text\n{body}\n```"

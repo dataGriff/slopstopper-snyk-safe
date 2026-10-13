@@ -551,8 +551,9 @@ def test_a_rerun_removes_the_workflows_this_suite_no_longer_ships(tmp_path):
         assert not (workflows / name).exists(), name
         assert f"removed obsolete workflow .github/workflows/{name}" in result.stdout
     assert (workflows / "deploy.yml").exists()
-    assert not (target / ".zap").exists()
-    assert "removed obsolete file .zap/rules.tsv" in result.stdout
+    # The adopter's ZAP rules are theirs: left in place, flagged as unused.
+    assert (target / ".zap/rules.tsv").read_text() == "10096\tIGNORE\n"
+    assert ".zap/rules.tsv is not read by this suite any more" in result.stdout
     marker = (target / ".ss/.workflows-installed").read_text().split()
     assert not (set(marker) & OBSOLETE_WORKFLOWS)
 

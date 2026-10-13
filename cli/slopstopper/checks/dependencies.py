@@ -96,6 +96,21 @@ def _read_projects() -> list[dict] | None:
     return projects
 
 
+def _unscanned() -> list[str]:
+    """One line per manifest Snyk could not scan, from the report it did
+    write: the entry's `error` names the manifest and the cause, and that
+    is what the could-not-run report must show."""
+    projects = _snyk.as_projects(_snyk.read_json(REPORT_JSON)) or []
+    lines = []
+    for project in projects:
+        if isinstance(project.get("vulnerabilities"), list):
+            continue
+        manifest = project.get("targetFile") or project.get("path") or project.get("displayTargetFile") or "?"
+        reason = project.get("error") or project.get("message") or "no result for this manifest"
+        lines.append(f"- `{manifest}`: {_snyk.truncate(str(reason), 200)}")
+    return lines
+
+
 def _findings(projects: list[dict]) -> list[dict]:
     """Every issue across every project, each tagged with its manifest.
 
@@ -171,17 +186,15 @@ def _findings_sections(findings: list[dict], gate: str) -> str:
     """The summary table and the three finding tables."""
     vulns = [f for f in findings if not _is_licence(f)]
     licences = [f for f in findings if _is_licence(f)]
-    blocking = _snyk.blocking(findings, gate)
+    blocking_vulns, other_vulns = _snyk.partition(vulns, gate)
     counts = _snyk.count_by_severity(findings)
     md = "| Metric | Count |\n|--------|-------|\n"
     md += f"| Total findings | {len(findings)} |\n"
     for sev in ("critical", "high", "medium", "low"):
         md += f"| {sev.capitalize()} | {counts[sev]} |\n"
     md += f"| Licence issues | {len(licences)} |\n\n"
-    md += _format_section(
-        [v for v in vulns if v in blocking], f"Blocking vulnerabilities (at or above `fail_on: {gate}`)", "🔴"
-    )
-    md += _format_section([v for v in vulns if v not in blocking], "Vulnerabilities below the gate", "⚠️")
+    md += _format_section(blocking_vulns, f"Blocking vulnerabilities (at or above `fail_on: {gate}`)", "🔴")
+    md += _format_section(other_vulns, "Vulnerabilities below the gate", "⚠️")
     md += _format_section(licences, "Licence policy issues", "📜")
     return md
 
@@ -221,10 +234,13 @@ def run(args: list[str] | None = None) -> int:
 
     projects = _read_projects()
     if projects is None or not _snyk.completed(rc):
-        return scan_incomplete(
-            REPORT_DIR, REPORT_MD, TITLE,
-            _snyk.incomplete_detail("Snyk Open Source", rc, projects is not None, stderr_tail, REPORT_JSON),
+        unscanned = _unscanned()
+        detail = _snyk.incomplete_detail(
+            "Snyk Open Source", rc, projects is not None or bool(unscanned), stderr_tail, REPORT_JSON
         )
+        if unscanned:
+            detail += "\n\nSnyk could not scan these manifests:\n\n" + "\n".join(unscanned)
+        return scan_incomplete(REPORT_DIR, REPORT_MD, TITLE, detail)
 
     REPORT_MD.write_text(_build_md_report(projects, gate))
     findings = _findings(projects)

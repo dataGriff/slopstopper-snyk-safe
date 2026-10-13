@@ -139,8 +139,7 @@ def _build_md_report(results: list[dict], gate: str, nothing_to_scan: bool = Fal
     md = f"# {TITLE}\n\n**Generated**: {_report.generated_at()}\n\n"
     if nothing_to_scan:
         return md + _snyk.nothing_supported_md("Snyk Code", "source files")
-    blocking = _snyk.blocking(results, gate, severity_of)
-    rest = [r for r in results if r not in blocking]
+    blocking, rest = _snyk.partition(results, gate, severity_of)
     md += "## Summary\n\n"
     if not results:
         md += "## ✅ SAST Status\n\nNo findings detected.\n\n"

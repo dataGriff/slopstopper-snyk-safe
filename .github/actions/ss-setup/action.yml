@@ -57,9 +57,10 @@ runs:
 
     - name: Install slopstopper-cli from source (slopstopper repo only)
       # In the slopstopper repo the CLI runs from source (HEAD): this is the
-      # code under test, so no pin applies. Adopter repos have no cli/
-      # source and take the next step instead.
-      if: ${{ hashFiles('cli/pyproject.toml') != '' }}
+      # code under test, so no pin applies. The test is the package itself
+      # (cli/slopstopper/), not any cli/pyproject.toml: an adopter whose own
+      # CLI lives under cli/ must still take the next step.
+      if: ${{ hashFiles('cli/slopstopper/__init__.py') != '' }}
       shell: bash
       run: pip install -e ./cli
 
@@ -70,7 +71,7 @@ runs:
       # yet): the two keys are the first `source:` and `ref:` lines
       # indented under a top-level `cli:` block. SLOPSTOPPER_CLI_SPEC, when
       # set, is used verbatim as the pip requirement instead.
-      if: ${{ hashFiles('cli/pyproject.toml') == '' }}
+      if: ${{ hashFiles('cli/slopstopper/__init__.py') == '' }}
       shell: bash
       run: |
         set -euo pipefail
