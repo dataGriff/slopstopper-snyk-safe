@@ -68,6 +68,19 @@ def test_cloudflare_adapter_parses_two_blocks(tmp_path):
     ]
 
 
+def test_cloudflare_adapter_reads_a_lower_case_header_name(tmp_path):
+    """Header names are case-insensitive, so a lower-case policy is still the policy."""
+    path = tmp_path / "_headers"
+    path.write_text("/*\n  content-security-policy: default-src 'self'\n")
+    assert cloudflare_adapter.parse(path) == [{"for": "/*", "csp": "default-src 'self'"}]
+
+
+def test_json_adapter_reads_a_lower_case_header_name(tmp_path):
+    path = tmp_path / "headers.json"
+    path.write_text(json.dumps([{"for": "/*", "values": {"content-security-policy": "default-src 'self'"}}]))
+    assert json_adapter.parse(path) == [{"for": "/*", "csp": "default-src 'self'"}]
+
+
 def test_cloudflare_adapter_ignores_comments_and_blanks(tmp_path):
     path = tmp_path / "_headers"
     path.write_text(
@@ -141,6 +154,17 @@ def test_meta_adapter_does_not_count_a_stricter_page_as_a_relaxation(tmp_path):
     meta_page(tmp_path, "a.html", GISCUS)
     meta_page(tmp_path, "strict.html", STRICT)
     assert meta_adapter.parse(tmp_path) == [{"for": "/*", "csp": GISCUS}]
+
+
+def test_meta_adapter_breaks_a_tie_toward_the_stricter_policy(tmp_path):
+    """Two pages, two policies: the relaxed one must surface as the exception,
+    whichever page sorts first, or the relaxation silently becomes the baseline."""
+    meta_page(tmp_path, "a.html", GISCUS)
+    meta_page(tmp_path, "b.html", STRICT)
+    assert meta_adapter.parse(tmp_path) == [
+        {"for": "/*", "csp": STRICT},
+        {"for": "/a.html", "csp": GISCUS},
+    ]
 
 
 def test_a_directory_source_is_detected_as_meta(tmp_path):

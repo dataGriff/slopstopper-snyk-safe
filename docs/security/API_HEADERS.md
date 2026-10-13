@@ -46,7 +46,7 @@ task ss:security:api-headers -- https://api.example.com \
 API_HEADERS_TEST_URL=https://api.example.com task ss:security:api-headers
 ```
 
-Report: `.ss/reports/api-headers/api-headers-report.{md,json}`. Also part of the `task ss:security:scan` aggregate.
+Report: `.ss/reports/api-headers/api-headers-report.{md,json}`. It is not part of the `task ss:security:scan` aggregate, which runs only the checks that read the repository; this one needs a URL.
 
 **Caveat:** this probes a *live* origin. The CORS and HSTS headers usually come from your edge or proxy, which a local process often doesn't reproduce, so a clean local run is weaker evidence than a clean run against a deployed environment.
 

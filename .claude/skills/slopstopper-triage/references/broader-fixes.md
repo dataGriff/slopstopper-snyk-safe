@@ -13,7 +13,7 @@ If multiple checks fail with the same root cause, batch-fix once and re-run all 
 - **Moving the `slopstopper-cli` pin** → if a default tuning was widened upstream, multiple checks go green at once. The CLI is pinned as a git tag under `cli:` in `.slopstopper.yml`; re-run `install.sh` from the new tag's checkout, bump `cli.ref`, install the same tag locally, commit so CI matches, then re-run the aggregates. Don't `pip install` a newer CLI by hand, because that drifts off the committed pin without updating CI.
 - **Moving the `snyk` pin in `mise.toml`** → a scanner bump can change verdicts on the same commit (new rules, a new advisory). It is a reviewable PR on purpose; `mise install` after the bump puts the new version on PATH locally.
 
-The aggregates make this fast: `task ss:hygiene:test` re-runs every hygiene check; `task ss:security:scan` re-runs every security check. Both are just sequenced `slopstopper run …` calls under the hood, so adopters who skip the Taskfile can chain the CLI invocations directly.
+The aggregates make this fast: `task ss:hygiene:test` re-runs every hygiene check; `task ss:security:scan` re-runs every static security check (API headers needs a URL, so run it on its own). Both are just sequenced `slopstopper run …` calls under the hood, so adopters who skip the Taskfile can chain the CLI invocations directly.
 
 ## Step 7: When to delete the check instead of fixing it
 

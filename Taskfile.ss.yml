@@ -585,24 +585,21 @@ tasks:
       - slopstopper run security:api-headers -- {{.CLI_ARGS}}
 
   security:scan:
-    desc: Run full security scan suite (SAST + dependencies + IaC + SBOM + secrets + API headers)
+    desc: Run the static security suite (SAST + dependencies + IaC + SBOM + secrets)
     # Runs every scan even when an earlier one fails. sast exits 1 on
     # findings, and a sequential `task:` list would stop there and never
     # reach secrets. Calls the CLI the way each shim does and exits with
-    # the worst code: 2 (couldn't run) > 1 > 0. A target passed after `--`
-    # goes to api-headers, the one check here that audits a URL; the
-    # others take no arguments and would reject it.
-    #   SNYK_TOKEN=... task ss:security:scan -- https://staging.example.com
+    # the worst code: 2 (couldn't run) > 1 > 0. Every check here reads the
+    # repository; api-headers audits a live URL, so it stays its own
+    # target (`task ss:security:api-headers -- <url>`).
+    #   SNYK_TOKEN=... task ss:security:scan
     cmds:
       - |
         worst=0
-        for check in sast dependencies iac sbom secrets api-headers; do
+        for check in sast dependencies iac sbom secrets; do
           code=0
           # `|| code=$?` is needed because Task's shell exits on a failure.
-          case "$check" in
-            api-headers) slopstopper run "security:$check" -- {{.CLI_ARGS}} || code=$? ;;
-            *) slopstopper run "security:$check" || code=$? ;;
-          esac
+          slopstopper run "security:$check" || code=$?
           if [ "$code" -gt "$worst" ]; then worst=$code; fi
         done
         exit "$worst"

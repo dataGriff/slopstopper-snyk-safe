@@ -48,7 +48,9 @@ dependencies = [
   # even though `brew install lizard` (a different `lz4` tool) is on PATH.
   # Promoting lizard from a test extra to a runtime dependency means
   # pipx installs it into the same venv and the check works out of the box.
-  "lizard>=1.17",
+  # Pinned exactly: a Lizard release can change complexity findings on the
+  # same commit, so it moves only in a reviewed bump (Dependabot, pip).
+  "lizard==1.24.1",
 ]
 
 [project.optional-dependencies]

@@ -24,6 +24,8 @@ def parse(path: Path) -> list[dict]:
         values = entry.get("values") or {}
         if not isinstance(for_path, str) or not isinstance(values, dict):
             continue
-        csp = values.get("Content-Security-Policy")
+        # Header names are case-insensitive (RFC 9110): the first key that
+        # spells the policy, in any case, is the policy.
+        csp = next((v for k, v in values.items() if str(k).lower() == "content-security-policy"), None)
         rules.append({"for": for_path, "csp": csp if isinstance(csp, str) else None})
     return rules

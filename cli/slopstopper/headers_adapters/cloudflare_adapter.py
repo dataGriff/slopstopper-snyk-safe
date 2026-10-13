@@ -29,7 +29,7 @@ def parse(path: Path) -> list[dict]:
     def flush() -> None:
         nonlocal current_path, current_headers
         if current_path is not None:
-            csp = current_headers.get("Content-Security-Policy")
+            csp = current_headers.get("content-security-policy")
             rules.append({
                 "for": current_path,
                 "csp": csp if isinstance(csp, str) else None,
@@ -49,7 +49,9 @@ def parse(path: Path) -> list[dict]:
         if current_path is None or ":" not in stripped:
             continue
         name, _, value = stripped.partition(":")
-        current_headers[name.strip()] = value.strip()
+        # Header names are case-insensitive (RFC 9110), so a file that
+        # spells it `content-security-policy:` still carries a policy.
+        current_headers[name.strip().lower()] = value.strip()
 
     flush()
     return rules

@@ -36,7 +36,7 @@ Run `task --list` for the full set. The most-used ones:
 | `task ss:security:iac` | Infrastructure-as-code scan (Snyk IaC) |
 | `task ss:security:sbom` | Software bill of materials (Snyk SBOM) |
 | `task ss:security:secrets` | Secrets detection (Gitleaks) |
-| `task ss:security:scan` | All of the above security checks in sequence |
+| `task ss:security:scan` | The five static security checks above in sequence (not the URL-driven API headers audit) |
 | `task ss:reliability:smoke` | Smoke tests against a URL |
 | `task ss:reliability:accessibility` | axe-core WCAG 2.1 AA audit |
 | `task ss:reliability:cwv` | Lighthouse CI / Core Web Vitals |

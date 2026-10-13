@@ -61,7 +61,11 @@ def parse(path: Path) -> list[dict]:
     policies = [csp for csp in pages.values() if csp]
     if not policies:
         return [{"for": url, "csp": None, "missing": True} for url in pages]
-    baseline = Counter(policies).most_common(1)[0][0]
+    # The most common policy is the baseline. A tie goes to the policy
+    # that allows the fewest external origins: picking the relaxed one
+    # would make the relaxation the baseline and hide it from the report.
+    counts = Counter(policies)
+    baseline = max(counts, key=lambda csp: (counts[csp], -len(csp_origins(csp))))
     allowed = csp_origins(baseline)
     rules: list[dict] = [{"for": "/*", "csp": baseline}]
     for url, csp in pages.items():

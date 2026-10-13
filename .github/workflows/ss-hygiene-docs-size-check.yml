@@ -10,12 +10,14 @@ on:
   pull_request:
     paths:
       - 'docs/**'
+      - '.slopstopper.yml'
       - '.github/workflows/ss-hygiene-docs-size-check.yml'
   push:
     branches:
       - main
     paths:
       - 'docs/**'
+      - '.slopstopper.yml'
       - '.github/workflows/ss-hygiene-docs-size-check.yml'
   workflow_dispatch:
 
