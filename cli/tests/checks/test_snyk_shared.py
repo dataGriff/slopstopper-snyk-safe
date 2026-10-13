@@ -201,7 +201,16 @@ def test_run_to_file_reports_an_exec_failure(monkeypatch, isolated_cwd):
     assert _snyk.run_to_file(["sbom"], out_path.parent, out_path) == (127, ["Exec format error"])
 
 
-def test_incomplete_detail_names_the_token_when_snyk_could_not_authenticate():
+def test_incomplete_detail_says_when_no_token_reached_the_check(monkeypatch):
+    """Snyk IaC fails on fetching org settings, not on an auth message, when
+    there is no token; the report must still name the missing secret."""
+    monkeypatch.delenv("SNYK_TOKEN", raising=False)
+    detail = _snyk.incomplete_detail("Snyk IaC", 2, False, ["IAC failure (SNYK-CLI-0012)"], Path("r.json"))
+    assert "No `SNYK_TOKEN` reached this check" in detail
+
+
+def test_incomplete_detail_names_the_token_when_snyk_could_not_authenticate(monkeypatch):
+    monkeypatch.setenv("SNYK_TOKEN", "present-but-rejected")
     detail = _snyk.incomplete_detail(
         "Snyk Code", 2, False, ["MissingApiTokenError: `snyk` requires an authenticated account."], Path("r.sarif")
     )
@@ -210,7 +219,8 @@ def test_incomplete_detail_names_the_token_when_snyk_could_not_authenticate():
     assert "MissingApiTokenError" in detail
 
 
-def test_incomplete_detail_without_an_auth_error_still_points_at_doctor():
+def test_incomplete_detail_without_an_auth_error_still_points_at_doctor(monkeypatch):
+    monkeypatch.setenv("SNYK_TOKEN", "present")
     detail = _snyk.incomplete_detail("Snyk IaC", 2, True, ["network timeout"], Path("r.json"))
     assert "reported a failure" in detail
     assert "SNYK_TOKEN" not in detail.split("network timeout")[0]

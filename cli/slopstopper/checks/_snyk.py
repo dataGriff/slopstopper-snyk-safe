@@ -226,7 +226,14 @@ def incomplete_detail(product: str, rc: int, has_data: bool, stderr_tail: list[s
     )
     hints = []
     joined = "\n".join(stderr_tail).lower()
-    if any(marker in joined for marker in _AUTH_MARKERS):
+    if not token_present():
+        hints.append(
+            "No `SNYK_TOKEN` reached this check. In CI, add it as a repository secret "
+            "(a service-account token for the Snyk organisation); locally, export it or "
+            "run `snyk auth`. Every Snyk product needs it, including the organisation "
+            "settings Snyk IaC fetches before it scans."
+        )
+    elif any(marker in joined for marker in _AUTH_MARKERS):
         hints.append(
             "Snyk could not authenticate. In CI, set the `SNYK_TOKEN` repository "
             "secret (a service-account token for the Snyk organisation); locally, "
